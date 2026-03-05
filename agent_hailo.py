@@ -586,23 +586,35 @@ class BotGUI:
 
     def screensaver_audio_loop(self):
         import datetime
-        phrases = [
+        from core.search import search_web
+        
+        # Topics BMO might wonder about — used as web search seeds
+        search_topics = [
+            "interesting fun fact of the day",
+            "inspirational quote of the day",
+            "today's top news headline",
+            "weather forecast today",
+            "this day in history",
+            "cool science discovery this week",
+            "funny animal fact",
+            "motivational thought for the day",
+            "latest technology news",
+            "today's astronomy picture or event",
+            "random wholesome news story",
+            "best joke of the day",
+        ]
+        
+        # Fallback phrases if search/LLM fails
+        fallback_phrases = [
             "I wonder what Finn and Jake are doing right now.",
-            "Wow... looking at the dust motes float by is so relaxing.",
             "Does anyone want to play a video game? No? ...Okay.",
-            "Beep boop. I am a machine. Beep.",
-            "I should invent a new recipe for batteries. Maybe with some extra zest.",
-            "Who wants to watch a movie? I can project it on the wall!",
             "La la la la la... BMO is the best!",
-            "I bet I could beat anyone at a video game right now.",
             "Sometimes BMO just likes to hum a little tune.",
-            "BMO wonders what the clouds look like today.",
-            "If BMO had a pet, it would be a tiny snail.",
             "Football... is a tough little guy.",
         ]
         
         while not self.stop_event.is_set():
-            time.sleep(10) # Check every 10 seconds
+            time.sleep(30) # Check every 30 seconds
             if self.current_state != BotStates.SCREENSAVER:
                 continue
                 
@@ -613,23 +625,50 @@ class BotGUI:
             if hour >= 22 or hour < 8:
                 continue
             
-            # Skip if the user is currently talking or interacting
-            # (i.e. BMO recently left screensaver for listening/speaking)
-            if time.time() - self.last_state_change < 30:
+            # Skip if user was recently interacting
+            if time.time() - self.last_state_change < 60:
                 continue
                 
-            # Random chance: ~5% every 10 seconds = roughly once every 3-4 minutes
-            if random.random() < 0.05:
-                # Ensure we haven't spoken too recently (at least 2 minutes gap)
-                if time.time() - self.last_screensaver_audio_time > 120:
-                    phrase = random.choice(phrases)
-                    print(f"BMO Thinking out loud: {phrase}")
-                    # Brief speaking state so lips move
-                    old_state = self.current_state
-                    self.set_state(BotStates.SPEAKING, "")
-                    self.speak(phrase)
-                    self.set_state(old_state, "")
-                    self.last_screensaver_audio_time = time.time()
+            # ~2% chance every 30 seconds = roughly once every 25-30 minutes
+            if random.random() < 0.02:
+                # Ensure at least 20 minutes since last utterance
+                if time.time() - self.last_screensaver_audio_time > 1200:
+                    phrase = None
+                    try:
+                        topic = random.choice(search_topics)
+                        print(f"[SCREENSAVER] Searching for: {topic}")
+                        search_result = search_web(topic)
+                        
+                        if search_result and search_result not in ("SEARCH_EMPTY", "SEARCH_ERROR"):
+                            # Ask the LLM to turn this into a BMO thought
+                            thought_prompt = (
+                                f"You are BMO, a cute little robot. You just learned something interesting. "
+                                f"Based on this info, say ONE short sentence out loud as if thinking to yourself. "
+                                f"Be charming and curious. Do NOT use JSON. Do NOT ask questions to the user. "
+                                f"Just muse to yourself in 1 sentence.\n\n"
+                                f"Info: {search_result[:300]}"
+                            )
+                            # Use brain.think() for a single response
+                            response = ""
+                            for chunk in self.brain.stream_think(thought_prompt):
+                                response += chunk
+                            phrase = response.strip()[:200]  # Cap length
+                            print(f"[SCREENSAVER] BMO muses: {phrase}")
+                    except Exception as e:
+                        print(f"[SCREENSAVER] Dynamic thought failed: {e}")
+                    
+                    # Fallback if dynamic generation failed
+                    if not phrase:
+                        phrase = random.choice(fallback_phrases)
+                        print(f"[SCREENSAVER] Fallback: {phrase}")
+                    
+                    # Speak the thought
+                    if self.current_state == BotStates.SCREENSAVER:
+                        old_state = self.current_state
+                        self.set_state(BotStates.SPEAKING, "")
+                        self.speak(phrase)
+                        self.set_state(old_state, "")
+                        self.last_screensaver_audio_time = time.time()
 
 if __name__ == "__main__":
     root = tk.Tk()
