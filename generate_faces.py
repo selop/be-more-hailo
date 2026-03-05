@@ -3,6 +3,7 @@ from PIL import Image, ImageDraw
 
 BG_COLOR = (189, 255, 203)
 LINE_COLOR = (0, 0, 0)
+MOUTH_FILL = (93, 195, 112)
 WIDTH, HEIGHT = 800, 480
 LINE_WIDTH = 8
 LEFT_EYE_X = 217
@@ -30,7 +31,7 @@ def draw_arc_eye(draw, cx, cy, radius, start, end):
     
     # PIL doesn't round arc ends, so we manually draw circles at the start/end bounds
     import math
-    r = LINE_WIDTH / 2.0 - 0.5 # slightly smaller to ensure no bulbous bulge
+    r = LINE_WIDTH / 2.0 # Perfect radius to snap the ends flush without a gap
     s_rad = math.radians(start)
     e_rad = math.radians(end)
     sx = cx + radius * math.cos(s_rad)
@@ -47,7 +48,7 @@ def draw_circle_eye(draw, cx, cy, radius):
 def draw_line(draw, x1, y1, x2, y2, width=LINE_WIDTH):
     draw.line([(x1, y1), (x2, y2)], fill=LINE_COLOR, width=width)
     # Rounded caps
-    r = width / 2.0 - 0.5
+    r = width / 2.0
     draw.ellipse([x1 - r, y1 - r, x1 + r, y1 + r], fill=LINE_COLOR)
     draw.ellipse([x2 - r, y2 - r, x2 + r, y2 + r], fill=LINE_COLOR)
 
@@ -105,11 +106,11 @@ def draw_mouth(draw, type="straight", open_amount=0):
         draw_arc_eye(draw, 399, MOUTH_Y + 20, MOUTH_W // 2, 225, 315)
     elif type == "surprised":
         # small circle
-        draw_circle_eye(draw, 399, MOUTH_Y, 20)
+        draw.ellipse([399 - 20, MOUTH_Y - 20, 399 + 20, MOUTH_Y + 20], fill=MOUTH_FILL, outline=LINE_COLOR, width=LINE_WIDTH)
     elif type == "speaking":
         # Oval mouth
         h = max(10, min(50, open_amount))
-        draw.ellipse([m_left, MOUTH_Y - h//2, m_right, MOUTH_Y + h//2], fill=None, outline=LINE_COLOR, width=LINE_WIDTH)
+        draw.ellipse([m_left, MOUTH_Y - h//2, m_right, MOUTH_Y + h//2], fill=MOUTH_FILL, outline=LINE_COLOR, width=LINE_WIDTH)
     elif type == "tongue":
         # straight line with a U underneath for tongue
         draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
