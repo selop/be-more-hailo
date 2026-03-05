@@ -178,23 +178,32 @@ class BotGUI:
                     img = Image.open(img_path).resize((self.BG_WIDTH, self.BG_HEIGHT))
                     self.animations[state].append(ImageTk.PhotoImage(img))
                     
-        # Load screensaver frames (one image per folder to avoid flashing animation sequences)
-        self.animations[BotStates.SCREENSAVER] = []
+        # Load screensaver as full animation sequences per expression
+        # This makes BMO play each expression's animation fully before moving on
+        self.screensaver_sequences = []  # List of (state_name, [frames])
         for state_dir in os.listdir(base):
-            if state_dir == "warmup":
+            if state_dir in ("warmup", "capturing", "error"):
                 continue
             path = os.path.join(base, state_dir)
             if os.path.isdir(path):
                 files = sorted([f for f in os.listdir(path) if f.lower().endswith('.png')])
                 if files:
-                    try:
-                        img = Image.open(os.path.join(path, files[0])).resize((self.BG_WIDTH, self.BG_HEIGHT))
-                        self.animations[BotStates.SCREENSAVER].append(ImageTk.PhotoImage(img))
-                    except Exception as e:
-                        print(f"Failed to load screensaver image {files[0]}: {e}")
+                    seq_frames = []
+                    for f in files:
+                        try:
+                            img = Image.open(os.path.join(path, f)).resize((self.BG_WIDTH, self.BG_HEIGHT))
+                            seq_frames.append(ImageTk.PhotoImage(img))
+                        except Exception as e:
+                            print(f"Failed to load screensaver image {f}: {e}")
+                    if seq_frames:
+                        self.screensaver_sequences.append((state_dir, seq_frames))
         
-        # Shuffle screensaver sequence so it's fresh each run
-        random.shuffle(self.animations[BotStates.SCREENSAVER])
+        # Build the screensaver animation: play each expression's full sequence
+        random.shuffle(self.screensaver_sequences)
+        self.animations[BotStates.SCREENSAVER] = []
+        for name, seq in self.screensaver_sequences:
+            # Play each expression's sequence 2x so you can see the animation
+            self.animations[BotStates.SCREENSAVER].extend(seq * 2)
     
     def update_animation(self):
         if self.current_state == BotStates.DISPLAY_IMAGE:
@@ -216,15 +225,18 @@ class BotGUI:
                 self.status_label.place_forget()
         else:
             if not self.status_label.winfo_ismapped():
-                self.status_label.place(relx=0.5, rely=0.9, anchor=tk.S)
+                self.status_label.place(relx=0.5, rely=0.92, anchor=tk.S)
 
         frames = self.animations.get(self.current_state, []) or self.animations.get(BotStates.IDLE, [])
         if frames:
             self.current_frame = (self.current_frame + 1) % len(frames)
             
-            # Re-shuffle screensaver when it loops completely
+            # Re-shuffle screensaver sequences when loop completes
             if self.current_state == BotStates.SCREENSAVER and self.current_frame == 0:
-                random.shuffle(self.animations[BotStates.SCREENSAVER])
+                random.shuffle(self.screensaver_sequences)
+                self.animations[BotStates.SCREENSAVER] = []
+                for name, seq in self.screensaver_sequences:
+                    self.animations[BotStates.SCREENSAVER].extend(seq * 2)
                 
             self.background_label.config(image=frames[self.current_frame])
         
@@ -237,7 +249,7 @@ class BotGUI:
         elif self.current_state == BotStates.LISTENING:
             speed = 400
         elif self.current_state == BotStates.SCREENSAVER:
-            speed = 5000 # 5 seconds per image like old script
+            speed = 400 # Smooth animation speed for sequences
 
         self.master.after(speed, self.update_animation)
 

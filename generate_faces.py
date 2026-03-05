@@ -195,9 +195,24 @@ def draw_mouth(draw, type="straight", open_amount=0):
             # Re-stroke the outer mouth line just in case tongue overflowed the bottom curve cleanly 
             draw.rounded_rectangle(box, radius=rad, fill=None, outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
     elif type == "tongue":
-        # straight line with a U underneath for tongue
+        # Straight line mouth with a colored tongue poking out below
         draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
-        draw_arc_eye(draw, 399 + 15, MOUTH_Y, 15, 0, 180)
+        # Tongue as a filled half-circle in TONGUE_COLOR, outlined in black
+        tongue_cx = 399 + 15
+        tongue_cy = MOUTH_Y
+        tongue_r = 15
+        # Draw filled tongue
+        bbox = [(tongue_cx - tongue_r) * SCALE, tongue_cy * SCALE,
+                (tongue_cx + tongue_r) * SCALE, (tongue_cy + tongue_r * 2) * SCALE]
+        draw.ellipse(bbox, fill=TONGUE_COLOR, outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
+        # Re-draw the mouth line on top so it covers the top edge of the tongue cleanly
+        x1, y1 = m_left * SCALE, MOUTH_Y * SCALE
+        x2, y2 = m_right * SCALE, MOUTH_Y * SCALE
+        w = LINE_WIDTH * SCALE
+        draw.line([(x1, y1), (x2, y2)], fill=LINE_COLOR, width=w)
+        r = w / 2.0
+        draw.ellipse([x1-r, y1-r, x1+r, y1+r], fill=LINE_COLOR)
+        draw.ellipse([x2-r, y2-r, x2+r, y2+r], fill=LINE_COLOR)
     elif type == "wavy":
         # squiggly mouth for dizzy (shift centers to account for PIL inward stroke)
         shift = LINE_WIDTH // 2
@@ -231,41 +246,64 @@ def gen_speaking(base_dir="faces/speaking"):
 
 def gen_happy(base_dir="faces/happy"):
     ensure_dir(base_dir)
-    for i in range(1, 5):
-        create_face(f"{base_dir}/happy_{i:02d}.png", lambda d: (draw_happy_eyes(d), draw_mouth(d, "smile")))
+    # Happy eyes with a bouncing smile effect
+    offsets = [0, -2, -4, -2, 0, 2, 4, 2]
+    for i, off in enumerate(offsets):
+        def draw_h(d, o=off):
+            draw_arc_eye(d, LEFT_EYE_X, EYE_Y + 13, EYE_R, 180, 360)
+            draw_arc_eye(d, RIGHT_EYE_X, EYE_Y + 13, EYE_R, 180, 360)
+            draw_arc_eye(d, 399, MOUTH_Y - 20 + o, MOUTH_W // 2, 45, 135)
+        create_face(f"{base_dir}/happy_{i+1:02d}.png", draw_h)
 
 def gen_sad(base_dir="faces/sad"):
     ensure_dir(base_dir)
-    for i in range(1, 5):
-        create_face(f"{base_dir}/sad_{i:02d}.png", lambda d: (draw_sad_eyes(d), draw_mouth(d, "frown")))
+    # Sad eyes droop progressively
+    droops = [0, 2, 4, 6, 4, 2]
+    for i, droop in enumerate(droops):
+        def draw_s(d, dr=droop):
+            draw_line(d, LEFT_EYE_X - EYE_R, EYE_VISUAL_Y + 10 + dr, LEFT_EYE_X + EYE_R, EYE_VISUAL_Y - 10 + dr)
+            draw_line(d, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y - 10 + dr, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y + 10 + dr)
+            draw_mouth(d, "frown")
+        create_face(f"{base_dir}/sad_{i+1:02d}.png", draw_s)
 
 def gen_angry(base_dir="faces/angry"):
     ensure_dir(base_dir)
-    for i in range(1, 5):
-        create_face(f"{base_dir}/angry_{i:02d}.png", lambda d: (draw_angry_eyes(d), draw_mouth(d, "straight")))
+    # Trembling angry effect — slight X jitter on the eyes
+    jitters = [0, -2, 0, 2, 0, -1, 0, 1]
+    for i, jit in enumerate(jitters):
+        def draw_a(d, j=jit):
+            draw_line(d, LEFT_EYE_X - EYE_R + j, EYE_VISUAL_Y - 10, LEFT_EYE_X + EYE_R + j, EYE_VISUAL_Y + 10)
+            draw_line(d, RIGHT_EYE_X - EYE_R - j, EYE_VISUAL_Y + 10, RIGHT_EYE_X + EYE_R - j, EYE_VISUAL_Y - 10)
+            draw_mouth(d, "straight")
+        create_face(f"{base_dir}/angry_{i+1:02d}.png", draw_a)
 
 def gen_surprised(base_dir="faces/surprised"):
     ensure_dir(base_dir)
-    for i in range(1, 4):
-        create_face(f"{base_dir}/surprised_{i:02d}.png", lambda d: (draw_surprised_eyes(d), draw_mouth(d, "surprised")))
+    # Surprise mouth pulsing slightly
+    sizes = [18, 20, 22, 20, 18, 16, 18, 20]
+    for i, s in enumerate(sizes):
+        def draw_su(d, sz=s):
+            draw_circle_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
+            draw_circle_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
+            draw_ellipse(d, [399 - sz, MOUTH_Y - sz, 399 + sz, MOUTH_Y + sz], fill=MOUTH_DARK, outline=LINE_COLOR, width=LINE_WIDTH)
+        create_face(f"{base_dir}/surprised_{i+1:02d}.png", draw_su)
 
 def gen_sleepy(base_dir="faces/sleepy"):
     ensure_dir(base_dir)
-    # Eyes closed
-    for i in range(1, 6):
-        z_offset = i * 5
+    # Longer z-floating sequence
+    for i in range(1, 9):
+        z_offset = i * 4
         def draw_sleepy(d, off=z_offset):
             draw_regular_eyes(d, 1.0)
             draw_mouth(d, "straight")
-            # Draw a Z using lines
-            if off > 10:
-                bx, by = 600, 120 - off
+            if off > 8:
+                bx, by = 600, 130 - off
                 s = 25
                 draw_line(d, bx, by, bx+s, by, width=4)
                 draw_line(d, bx+s, by, bx, by+s, width=4)
                 draw_line(d, bx, by+s, bx+s, by+s, width=4)
-            if off > 20: 
-                bx, by = 650, 80 - off
+            if off > 16: 
+                bx, by = 650, 90 - off
                 s = 15
                 draw_line(d, bx, by, bx+s, by, width=3)
                 draw_line(d, bx+s, by, bx, by+s, width=3)
@@ -301,8 +339,28 @@ def gen_dizzy(base_dir="faces/dizzy"):
 
 def gen_cheeky(base_dir="faces/cheeky"):
     ensure_dir(base_dir)
-    for i in range(1, 5):
-        create_face(f"{base_dir}/cheeky_{i:02d}.png", lambda d: (draw_cheeky_eyes(d), draw_mouth(d, "tongue")))
+    # Tongue wagging side to side
+    tongue_offsets = [10, 15, 20, 15, 10, 5, 0, 5]
+    for i, toff in enumerate(tongue_offsets):
+        def draw_chk(d, to=toff):
+            draw_cheeky_eyes(d)
+            m_left = 399 - (MOUTH_W // 2)
+            m_right = 399 + (MOUTH_W // 2)
+            draw_line(d, m_left, MOUTH_Y, m_right, MOUTH_Y)
+            tc = 399 + to
+            tr = 15
+            bbox = [(tc - tr) * SCALE, MOUTH_Y * SCALE,
+                    (tc + tr) * SCALE, (MOUTH_Y + tr * 2) * SCALE]
+            d.ellipse(bbox, fill=TONGUE_COLOR, outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
+            # Re-draw mouth line on top
+            x1, y1 = m_left * SCALE, MOUTH_Y * SCALE
+            x2, y2 = m_right * SCALE, MOUTH_Y * SCALE
+            w = LINE_WIDTH * SCALE
+            d.line([(x1, y1), (x2, y2)], fill=LINE_COLOR, width=w)
+            r = w / 2.0
+            d.ellipse([x1-r, y1-r, x1+r, y1+r], fill=LINE_COLOR)
+            d.ellipse([x2-r, y2-r, x2+r, y2+r], fill=LINE_COLOR)
+        create_face(f"{base_dir}/cheeky_{i+1:02d}.png", draw_chk)
 
 def gen_heart(base_dir="faces/heart"):
     ensure_dir(base_dir)
