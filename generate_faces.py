@@ -404,6 +404,84 @@ def gen_capturing(base_dir="faces/capturing"):
 def gen_warmup(base_dir="faces/warmup"):
     ensure_dir(base_dir)
     create_face(f"{base_dir}/warmup_01.png", lambda d: (draw_regular_eyes(d, 0.5), draw_mouth(d, "straight")))
+def gen_daydream(base_dir="faces/daydream"):
+    """Eyes drift upward with floating thought bubbles — BMO lost in thought"""
+    ensure_dir(base_dir)
+    import math
+    for i in range(10):
+        drift = int(3 * math.sin(i * math.pi / 5))  # gentle up-down
+        bubble_y = 180 - i * 8  # bubbles float upward
+        def draw_dd(d, dr=drift, by=bubble_y, frame=i):
+            # Dreamy half-closed eyes looking up
+            draw_arc_eye(d, LEFT_EYE_X, EYE_Y - 3 + dr, EYE_R, 340, 200)
+            draw_arc_eye(d, RIGHT_EYE_X, EYE_Y - 3 + dr, EYE_R, 340, 200)
+            # Gentle straight mouth
+            draw_mouth(d, "straight")
+            # Floating thought bubbles (small circles rising)
+            if frame > 2:
+                draw_ellipse(d, [620, by + 20, 630, by + 30], fill=LINE_COLOR)
+            if frame > 4:
+                draw_ellipse(d, [635, by, 650, by + 15], fill=LINE_COLOR)
+            if frame > 6:
+                draw_ellipse(d, [642, by - 25, 665, by - 5], fill=LINE_COLOR)
+        create_face(f"{base_dir}/daydream_{i+1:02d}.png", draw_dd)
+
+def gen_bored(base_dir="faces/bored"):
+    """Eyes scanning left and right — BMO looking around"""
+    ensure_dir(base_dir)
+    # Eye offsets for scanning: left, center, right, center, repeat
+    offsets = [-8, -5, 0, 5, 8, 5, 0, -5]
+    for i, off in enumerate(offsets):
+        def draw_bored(d, o=off):
+            # Arc eyes shifted horizontally
+            draw_arc_eye(d, LEFT_EYE_X + o, EYE_Y, EYE_R, 335, 205)
+            draw_arc_eye(d, RIGHT_EYE_X + o, EYE_Y, EYE_R, 335, 205)
+            # Slight frown
+            draw_arc_eye(d, 399, MOUTH_Y + 15, MOUTH_W // 2, 235, 305)
+        create_face(f"{base_dir}/bored_{i+1:02d}.png", draw_bored)
+
+def gen_jamming(base_dir="faces/jamming"):
+    """Eyes closed, smiling, musical notes bouncing — BMO enjoying music"""
+    ensure_dir(base_dir)
+    import math
+    for i in range(8):
+        note_bounce = int(5 * math.sin(i * math.pi / 4))
+        def draw_jam(d, nb=note_bounce, frame=i):
+            # Closed happy eyes (straight lines slightly curved up)
+            draw_line(d, LEFT_EYE_X - EYE_R, EYE_VISUAL_Y, LEFT_EYE_X + EYE_R, EYE_VISUAL_Y)
+            draw_line(d, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y)
+            # Big smile
+            draw_arc_eye(d, 399, MOUTH_Y - 20, MOUTH_W // 2, 45, 135)
+            # Musical notes: ♪ drawn as small circles with stems
+            # Note 1
+            nx, ny = 620 + (frame % 4) * 5, 150 + nb
+            draw_ellipse(d, [nx, ny, nx+10, ny+8], fill=LINE_COLOR)
+            draw_line(d, nx+10, ny, nx+10, ny-20, width=3)
+            draw_line(d, nx+10, ny-20, nx+16, ny-18, width=3)
+            # Note 2 (offset)
+            if frame > 2:
+                nx2, ny2 = 650 - (frame % 3) * 4, 130 - nb
+                draw_ellipse(d, [nx2, ny2, nx2+10, ny2+8], fill=LINE_COLOR)
+                draw_line(d, nx2+10, ny2, nx2+10, ny2-20, width=3)
+                draw_line(d, nx2+10, ny2-20, nx2+16, ny2-18, width=3)
+        create_face(f"{base_dir}/jamming_{i+1:02d}.png", draw_jam)
+
+def gen_curious(base_dir="faces/curious"):
+    """One eye bigger than the other, tilted — BMO noticing something"""
+    ensure_dir(base_dir)
+    import math
+    for i in range(8):
+        # Subtle eye size pulsing
+        big_r = EYE_R + 2 + int(3 * math.sin(i * math.pi / 4))
+        small_r = EYE_R - 4
+        def draw_cur(d, br=big_r, sr=small_r):
+            # Big curious left eye
+            draw_circle_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, br)
+            # Small squinting right eye
+            draw_circle_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, sr)
+            # Slightly asymmetric mouth
+            draw_mouth(d, "straight")
+        create_face(f"{base_dir}/curious_{i+1:02d}.png", draw_cur)
 
 if __name__ == "__main__":
     print("Generating BMO Faces...")
@@ -424,6 +502,10 @@ if __name__ == "__main__":
     gen_error()
     gen_capturing()
     gen_warmup()
+    gen_daydream()
+    gen_bored()
+    gen_jamming()
+    gen_curious()
     
     # Remove any leftover original (space-named) files that would cause frame jumping
     import glob

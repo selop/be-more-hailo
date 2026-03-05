@@ -179,24 +179,28 @@ class BotGUI:
                     self.animations[state].append(ImageTk.PhotoImage(img))
                     
         # Load screensaver as full animation sequences per expression
-        # This makes BMO play each expression's animation fully before moving on
+        # Only include expressions that make sense without audio context
+        SCREENSAVER_STATES = [
+            "idle", "happy", "sleepy", "heart", "starry_eyed",
+            "cheeky", "dizzy", "confused",
+            "daydream", "bored", "jamming", "curious"
+        ]
         self.screensaver_sequences = []  # List of (state_name, [frames])
-        for state_dir in os.listdir(base):
-            if state_dir in ("warmup", "capturing", "error"):
-                continue
+        for state_dir in SCREENSAVER_STATES:
             path = os.path.join(base, state_dir)
-            if os.path.isdir(path):
-                files = sorted([f for f in os.listdir(path) if f.lower().endswith('.png')])
-                if files:
-                    seq_frames = []
-                    for f in files:
-                        try:
-                            img = Image.open(os.path.join(path, f)).resize((self.BG_WIDTH, self.BG_HEIGHT))
-                            seq_frames.append(ImageTk.PhotoImage(img))
-                        except Exception as e:
-                            print(f"Failed to load screensaver image {f}: {e}")
-                    if seq_frames:
-                        self.screensaver_sequences.append((state_dir, seq_frames))
+            if not os.path.isdir(path):
+                continue
+            files = sorted([f for f in os.listdir(path) if f.lower().endswith('.png')])
+            if files:
+                seq_frames = []
+                for f in files:
+                    try:
+                        img = Image.open(os.path.join(path, f)).resize((self.BG_WIDTH, self.BG_HEIGHT))
+                        seq_frames.append(ImageTk.PhotoImage(img))
+                    except Exception as e:
+                        print(f"Failed to load screensaver image {f}: {e}")
+                if seq_frames:
+                    self.screensaver_sequences.append((state_dir, seq_frames))
         
         # Build the screensaver animation: play each expression's full sequence
         random.shuffle(self.screensaver_sequences)

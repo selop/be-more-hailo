@@ -118,6 +118,7 @@
             overflow: hidden;
             display: -webkit-box;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             -webkit-box-orient: vertical;
         }
 
@@ -769,7 +770,23 @@
             listening: [],
             thinking: [],
             speaking: [],
-            error: []
+            error: [],
+            happy: [],
+            sad: [],
+            angry: [],
+            surprised: [],
+            sleepy: [],
+            dizzy: [],
+            cheeky: [],
+            heart: [],
+            starry_eyed: [],
+            confused: [],
+            daydream: [],
+            bored: [],
+            jamming: [],
+            curious: [],
+            capturing: [],
+            warmup: []
         };
         let soundFiles = {
             greeting_sounds: [],
@@ -782,13 +799,71 @@
         let audioChunks = [];
         let isRecording = false;
 
+        // Screensaver state
+        let screensaverTimeout = null;
+        let screensaverActive = false;
+        const SCREENSAVER_DELAY = 60000; // 60 seconds
+        const SCREENSAVER_STATES = [
+            'idle', 'happy', 'sleepy', 'heart', 'starry_eyed',
+            'cheeky', 'dizzy', 'confused',
+            'daydream', 'bored', 'jamming', 'curious'
+        ];
+
+        function resetScreensaverTimer() {
+            if (screensaverTimeout) clearTimeout(screensaverTimeout);
+            if (screensaverActive) {
+                screensaverActive = false;
+                setFaceState('idle');
+            }
+            screensaverTimeout = setTimeout(startScreensaver, SCREENSAVER_DELAY);
+        }
+
+        function startScreensaver() {
+            screensaverActive = true;
+            playScreensaverSequence();
+        }
+
+        function playScreensaverSequence() {
+            if (!screensaverActive) return;
+            // Pick a random screensaver state
+            const state = SCREENSAVER_STATES[Math.floor(Math.random() * SCREENSAVER_STATES.length)];
+            const images = faceImages[state];
+            if (!images || images.length === 0) {
+                // Skip if no images, try next
+                setTimeout(playScreensaverSequence, 100);
+                return;
+            }
+
+            if (animationInterval) clearInterval(animationInterval);
+            bmoFace.style.display = 'block';
+            bmoFace.classList.remove('idle-animation');
+
+            let frameIndex = 0;
+            const totalLoops = 2; // play sequence 2x
+            const totalFrames = images.length * totalLoops;
+            let framesShown = 0;
+
+            bmoFace.src = images[0];
+            animationInterval = setInterval(() => {
+                framesShown++;
+                if (framesShown >= totalFrames) {
+                    clearInterval(animationInterval);
+                    // Move to next expression
+                    setTimeout(playScreensaverSequence, 200);
+                    return;
+                }
+                frameIndex = framesShown % images.length;
+                bmoFace.src = images[frameIndex];
+            }, 400);
+        }
+
         // Initialize
         async function init() {
-            await loadFaces('idle');
-            await loadFaces('listening');
-            await loadFaces('thinking');
-            await loadFaces('speaking');
-            await loadFaces('error');
+            // Load all expression states
+            const allStates = Object.keys(faceImages);
+            for (const state of allStates) {
+                await loadFaces(state);
+            }
 
             await loadSounds('greeting_sounds');
             await loadSounds('ack_sounds');
@@ -798,12 +873,12 @@
             const greetingAudio = playRandomSound('greeting_sounds');
             if (greetingAudio) {
                 // We default to idle. Only switch to speaking if audio PLAYS successfully.
-                setFaceState('idle'); 
-                
+                setFaceState('idle');
+
                 greetingAudio.onplay = () => {
                     setFaceState('speaking');
                 };
-                
+
                 greetingAudio.onended = () => {
                     setFaceState('idle');
                 };
@@ -835,6 +910,12 @@
 
             // Initialize Hands-Free Mode
             initHandsFreeMode();
+
+            // Start screensaver timer
+            resetScreensaverTimer();
+            // Reset on any user interaction
+            document.addEventListener('click', resetScreensaverTimer);
+            document.addEventListener('keypress', resetScreensaverTimer);
         }
 
         let wakeWordSocket = null;
@@ -1103,11 +1184,11 @@
                     } else {
                         console.log("No speech detected in audio.");
                     }
-                    
+
                     // Crucial fix: Reset state if no speech was detected
                     setFaceState('idle');
                     removeTypingIndicator();
-                    
+
                     // Restart wake word listener if hands-free is on
                     if (document.getElementById('hands-free-toggle').checked) {
                         startWakeWordListener();
@@ -1218,9 +1299,13 @@
             // If multiple frames, animate
             if (images.length > 1) {
                 let speed = 500;
-                if (state === 'speaking') speed = 150; // More natural speaking speed
-                if (state === 'thinking') speed = 500; // Smooth thinking speed
-                if (state === 'listening') speed = 400; // Gentle listening speed
+                if (state === 'speaking') speed = 150;
+                if (state === 'thinking') speed = 500;
+                if (state === 'listening') speed = 400;
+                // Expression states animate at a moderate speed
+                if (['happy', 'sad', 'angry', 'surprised', 'sleepy', 'dizzy',
+                    'cheeky', 'heart', 'starry_eyed', 'confused',
+                    'daydream', 'bored', 'jamming', 'curious'].includes(state)) speed = 350;
 
                 animationInterval = setInterval(() => {
                     frameIndex = (frameIndex + 1) % images.length;
@@ -1401,14 +1486,20 @@
                     let responseText = data.response;
                     let imageUrl = null;
 
-                    // Check for display_image action
+                    // Check for actions in JSON
                     const jsonMatch = responseText.match(/\{.*?\}/s);
                     if (jsonMatch) {
                         try {
                             const actionData = JSON.parse(jsonMatch[0]);
                             if (actionData.action === 'display_image' && actionData.image_url) {
                                 imageUrl = actionData.image_url;
-                                // Remove JSON from text
+                                responseText = responseText.replace(jsonMatch[0], '').trim();
+                            } else if (actionData.action === 'set_expression' && actionData.value) {
+                                // Set expression then remove JSON from displayed text
+                                if (faceImages[actionData.value] && faceImages[actionData.value].length > 0) {
+                                    setFaceState(actionData.value);
+                                    setTimeout(() => setFaceState('idle'), 5000);
+                                }
                                 responseText = responseText.replace(jsonMatch[0], '').trim();
                             }
                         } catch (e) {
@@ -1545,14 +1636,19 @@
                     let responseText = data.response;
                     let imageUrl = null;
 
-                    // Check for display_image action
+                    // Check for actions in JSON
                     const jsonMatch = responseText.match(/\{.*?\}/s);
                     if (jsonMatch) {
                         try {
                             const actionData = JSON.parse(jsonMatch[0]);
                             if (actionData.action === 'display_image' && actionData.image_url) {
                                 imageUrl = actionData.image_url;
-                                // Remove JSON from text
+                                responseText = responseText.replace(jsonMatch[0], '').trim();
+                            } else if (actionData.action === 'set_expression' && actionData.value) {
+                                if (faceImages[actionData.value] && faceImages[actionData.value].length > 0) {
+                                    setFaceState(actionData.value);
+                                    setTimeout(() => setFaceState('idle'), 5000);
+                                }
                                 responseText = responseText.replace(jsonMatch[0], '').trim();
                             }
                         } catch (e) {
