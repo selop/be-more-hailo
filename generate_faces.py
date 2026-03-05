@@ -11,9 +11,10 @@ SCALE = 4
 LINE_WIDTH = 8
 LEFT_EYE_X = 217
 RIGHT_EYE_X = 581
-EYE_Y = 195 # Tuned: original center Y=199.7, was 201.7 at 197, now -2 → 195
+EYE_Y = 195 # Arc center point for U-shaped eyes
+EYE_VISUAL_Y = 200 # Visual center of the arc eye (arc 335-205 shifts mass down ~5px)
 EYE_R = 18
-MOUTH_Y = 302 # Tuned: original center Y=301.5, was 304.5 at 305, now -3 → 302
+MOUTH_Y = 302
 MOUTH_W = 97
 
 def ensure_dir(path):
@@ -72,9 +73,9 @@ def draw_ellipse(draw, bbox, fill=None, outline=None, width=0):
 
 def draw_regular_eyes(draw, blink=0.0):
     if blink >= 0.9:
-        # Closed eyes (straight lines)
-        draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y, LEFT_EYE_X + EYE_R, EYE_Y)
-        draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y, RIGHT_EYE_X + EYE_R, EYE_Y)
+        # Closed eyes (straight lines) - use visual center so they align
+        draw_line(draw, LEFT_EYE_X - EYE_R, EYE_VISUAL_Y, LEFT_EYE_X + EYE_R, EYE_VISUAL_Y)
+        draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y)
     elif blink > 0.0:
         # Half blink
         draw_arc_eye(draw, LEFT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 345, 195)
@@ -85,26 +86,27 @@ def draw_regular_eyes(draw, blink=0.0):
         draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y, EYE_R, 335, 205)
 
 def draw_angry_eyes(draw):
-    draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y - 10, LEFT_EYE_X + EYE_R, EYE_Y + 10)
-    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y + 10, RIGHT_EYE_X + EYE_R, EYE_Y - 10)
+    draw_line(draw, LEFT_EYE_X - EYE_R, EYE_VISUAL_Y - 10, LEFT_EYE_X + EYE_R, EYE_VISUAL_Y + 10)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y + 10, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y - 10)
     
 def draw_happy_eyes(draw):
-    draw_arc_eye(draw, LEFT_EYE_X, EYE_Y + 10, EYE_R, 180, 360)
-    draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y + 10, EYE_R, 180, 360)
+    # Inverted arc (180-360) shifts visual center UP, so push down further
+    draw_arc_eye(draw, LEFT_EYE_X, EYE_Y + 13, EYE_R, 180, 360)
+    draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y + 13, EYE_R, 180, 360)
     
 def draw_surprised_eyes(draw):
-    draw_circle_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R - 2)
-    draw_circle_eye(draw, RIGHT_EYE_X, EYE_Y, EYE_R - 2)
+    draw_circle_eye(draw, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
+    draw_circle_eye(draw, RIGHT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
 
 def draw_sad_eyes(draw):
-    draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y + 10, LEFT_EYE_X + EYE_R, EYE_Y - 10)
-    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y - 10, RIGHT_EYE_X + EYE_R, EYE_Y + 10)
+    draw_line(draw, LEFT_EYE_X - EYE_R, EYE_VISUAL_Y + 10, LEFT_EYE_X + EYE_R, EYE_VISUAL_Y - 10)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y - 10, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y + 10)
 
 def draw_dizzy_eyes(draw):
-    draw_line(draw, LEFT_EYE_X - 15, EYE_Y - 15, LEFT_EYE_X + 15, EYE_Y + 15)
-    draw_line(draw, LEFT_EYE_X - 15, EYE_Y + 15, LEFT_EYE_X + 15, EYE_Y - 15)
-    draw_line(draw, RIGHT_EYE_X - 15, EYE_Y - 15, RIGHT_EYE_X + 15, EYE_Y + 15)
-    draw_line(draw, RIGHT_EYE_X - 15, EYE_Y + 15, RIGHT_EYE_X + 15, EYE_Y - 15)
+    draw_line(draw, LEFT_EYE_X - 15, EYE_VISUAL_Y - 15, LEFT_EYE_X + 15, EYE_VISUAL_Y + 15)
+    draw_line(draw, LEFT_EYE_X - 15, EYE_VISUAL_Y + 15, LEFT_EYE_X + 15, EYE_VISUAL_Y - 15)
+    draw_line(draw, RIGHT_EYE_X - 15, EYE_VISUAL_Y - 15, RIGHT_EYE_X + 15, EYE_VISUAL_Y + 15)
+    draw_line(draw, RIGHT_EYE_X - 15, EYE_VISUAL_Y + 15, RIGHT_EYE_X + 15, EYE_VISUAL_Y - 15)
 
 def draw_heart_eye(draw, cx, cy, scale=1.0):
     # Draw a cute heart shape centered at cx, cy using polygons
@@ -140,12 +142,12 @@ def draw_star_eye(draw, cx, cy, rotation=0):
 
 def draw_confused_eyes(draw):
     # One big, one flat
-    draw_circle_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R + 5)
-    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y, RIGHT_EYE_X + EYE_R, EYE_Y)
+    draw_circle_eye(draw, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R + 5)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y)
 
 def draw_cheeky_eyes(draw):
-    draw_circle_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R - 2)
-    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y, RIGHT_EYE_X + EYE_R, EYE_Y)
+    draw_circle_eye(draw, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y)
 
 def draw_mouth(draw, type="straight", open_amount=0):
     m_left = 399 - (MOUTH_W // 2)
@@ -222,8 +224,8 @@ def gen_speaking(base_dir="faces/speaking"):
     for i, h in enumerate(heights):
         # Speaking BMO has fully open circular eyes, matching the idle eye radius
         def draw_spk(d, hm=h):
-            draw_circle_eye(d, LEFT_EYE_X, EYE_Y, EYE_R - 1) # matching size exactly
-            draw_circle_eye(d, RIGHT_EYE_X, EYE_Y, EYE_R - 1)
+            draw_circle_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 1)
+            draw_circle_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, EYE_R - 1)
             draw_mouth(d, "speaking", hm)
         create_face(f"{base_dir}/speaking_{i:02d}.png", draw_spk)
 
@@ -306,12 +308,12 @@ def gen_heart(base_dir="faces/heart"):
     ensure_dir(base_dir)
     scales = [1.0, 1.2, 1.5, 1.2, 1.0, 1.0]
     for i, s in enumerate(scales):
-        create_face(f"{base_dir}/heart_{i:02d}.png", lambda d, s=s: (draw_heart_eye(d, LEFT_EYE_X, EYE_Y, s), draw_heart_eye(d, RIGHT_EYE_X, EYE_Y, s), draw_mouth(d, "smile")))
+        create_face(f"{base_dir}/heart_{i:02d}.png", lambda d, s=s: (draw_heart_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, s), draw_heart_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, s), draw_mouth(d, "smile")))
 
 def gen_starry(base_dir="faces/starry_eyed"):
     ensure_dir(base_dir)
     for i in range(8):
-        create_face(f"{base_dir}/starry_{i:02d}.png", lambda d, r=i*11.25: (draw_star_eye(d, LEFT_EYE_X, EYE_Y, r), draw_star_eye(d, RIGHT_EYE_X, EYE_Y, r), draw_mouth(d, "surprised")))
+        create_face(f"{base_dir}/starry_{i:02d}.png", lambda d, r=i*11.25: (draw_star_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, r), draw_star_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, r), draw_mouth(d, "surprised")))
 
 def gen_confused(base_dir="faces/confused"):
     ensure_dir(base_dir)
