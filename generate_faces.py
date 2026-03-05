@@ -4,7 +4,13 @@ from PIL import Image, ImageDraw
 BG_COLOR = (189, 255, 203)
 LINE_COLOR = (0, 0, 0)
 WIDTH, HEIGHT = 800, 480
-LINE_WIDTH = 12
+LINE_WIDTH = 8
+LEFT_EYE_X = 217
+RIGHT_EYE_X = 581
+EYE_Y = 198
+EYE_R = 18
+MOUTH_Y = 301
+MOUTH_W = 97
 
 def ensure_dir(path):
     if not os.path.exists(path):
@@ -19,102 +25,99 @@ def create_face(filename, draw_func):
 
 # Helper draw functions
 def draw_arc_eye(draw, cx, cy, radius, start, end):
-    # PIL arc requires a bounding box [x0, y0, x1, y1]
     bbox = [cx - radius, cy - radius, cx + radius, cy + radius]
     draw.arc(bbox, start, end, fill=LINE_COLOR, width=LINE_WIDTH)
+    
+    # PIL doesn't round arc ends, so we manually draw circles at the start/end bounds
+    import math
+    r = LINE_WIDTH / 2.0 - 0.5 # slightly smaller to ensure no bulbous bulge
+    s_rad = math.radians(start)
+    e_rad = math.radians(end)
+    sx = cx + radius * math.cos(s_rad)
+    sy = cy + radius * math.sin(s_rad)
+    ex = cx + radius * math.cos(e_rad)
+    ey = cy + radius * math.sin(e_rad)
+    draw.ellipse([sx - r, sy - r, sx + r, sy + r], fill=LINE_COLOR)
+    draw.ellipse([ex - r, ey - r, ex + r, ey + r], fill=LINE_COLOR)
 
 def draw_circle_eye(draw, cx, cy, radius):
     bbox = [cx - radius, cy - radius, cx + radius, cy + radius]
     draw.ellipse(bbox, fill=LINE_COLOR)
 
 def draw_line(draw, x1, y1, x2, y2, width=LINE_WIDTH):
-    draw.line([(x1, y1), (x2, y2)], fill=LINE_COLOR, width=width, joint="curve")
-    # To get rounded caps, we also need to draw circles at the endpoints
-    r = width // 2
+    draw.line([(x1, y1), (x2, y2)], fill=LINE_COLOR, width=width)
+    # Rounded caps
+    r = width / 2.0 - 0.5
     draw.ellipse([x1 - r, y1 - r, x1 + r, y1 + r], fill=LINE_COLOR)
     draw.ellipse([x2 - r, y2 - r, x2 + r, y2 + r], fill=LINE_COLOR)
 
 def draw_regular_eyes(draw, blink=0.0):
-    # blink: 0.0 = open, 1.0 = closed
-    # Left eye: arc from 0 to 180
-    
-    # BMO's standard eyes are little upward-facing arcs (u shape)
-    # The original image has arcs that look like closed eyes pointing UP
-    # Actually wait - BMO's classic eyes are just dots or small straight lines sometimes, but the existing idle face has "u" shaped eyes. 
-    # Arc degrees: 0 is 3 o'clock, 90 is 6 o'clock, 180 is 9 o'clock.
-    # So an upward-facing U shape is from 0 to 180.
-    
     if blink >= 0.9:
         # Closed eyes (straight lines)
-        draw_line(draw, 220, 200, 260, 200)
-        draw_line(draw, 540, 200, 580, 200)
+        draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y, LEFT_EYE_X + EYE_R, EYE_Y)
+        draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y, RIGHT_EYE_X + EYE_R, EYE_Y)
     elif blink > 0.0:
         # Half blink
-        draw_arc_eye(draw, 240, 200 - int(10 * blink), 20, 0, 180)
-        draw_arc_eye(draw, 560, 200 - int(10 * blink), 20, 0, 180)
+        draw_arc_eye(draw, LEFT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 0, 180)
+        draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 0, 180)
     else:
         # Open eyes (U shape)
-        draw_arc_eye(draw, 240, 200, 20, 0, 180)
-        draw_arc_eye(draw, 560, 200, 20, 0, 180)
+        draw_arc_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R, 0, 180)
+        draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y, EYE_R, 0, 180)
 
 def draw_angry_eyes(draw):
-    # Angled lines \  /
-    draw_line(draw, 220, 180, 260, 220)
-    draw_line(draw, 540, 220, 580, 180)
+    draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y - 10, LEFT_EYE_X + EYE_R, EYE_Y + 10)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y + 10, RIGHT_EYE_X + EYE_R, EYE_Y - 10)
     
 def draw_happy_eyes(draw):
-    # Inverted U shapes ^ ^
-    draw_arc_eye(draw, 240, 220, 20, 180, 360)
-    draw_arc_eye(draw, 560, 220, 20, 180, 360)
+    draw_arc_eye(draw, LEFT_EYE_X, EYE_Y + 10, EYE_R, 180, 360)
+    draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y + 10, EYE_R, 180, 360)
     
 def draw_surprised_eyes(draw):
-    # Big wide open circles
-    draw_circle_eye(draw, 240, 200, 15)
-    draw_circle_eye(draw, 560, 200, 15)
+    draw_circle_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R - 2)
+    draw_circle_eye(draw, RIGHT_EYE_X, EYE_Y, EYE_R - 2)
 
 def draw_sad_eyes(draw):
-    # Angled lines /  \
-    draw_line(draw, 220, 220, 260, 180)
-    draw_line(draw, 540, 180, 580, 220)
+    draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y + 10, LEFT_EYE_X + EYE_R, EYE_Y - 10)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y - 10, RIGHT_EYE_X + EYE_R, EYE_Y + 10)
 
 def draw_dizzy_eyes(draw):
-    # Swirls or X's. Let's do X's for simplicity and style
-    # Left X
-    draw_line(draw, 220, 180, 260, 220)
-    draw_line(draw, 220, 220, 260, 180)
-    # Right X
-    draw_line(draw, 540, 180, 580, 220)
-    draw_line(draw, 540, 220, 580, 180)
+    draw_line(draw, LEFT_EYE_X - 15, EYE_Y - 15, LEFT_EYE_X + 15, EYE_Y + 15)
+    draw_line(draw, LEFT_EYE_X - 15, EYE_Y + 15, LEFT_EYE_X + 15, EYE_Y - 15)
+    draw_line(draw, RIGHT_EYE_X - 15, EYE_Y - 15, RIGHT_EYE_X + 15, EYE_Y + 15)
+    draw_line(draw, RIGHT_EYE_X - 15, EYE_Y + 15, RIGHT_EYE_X + 15, EYE_Y - 15)
 
 def draw_cheeky_eyes(draw):
-    # One open, one winking (line)
-    draw_circle_eye(draw, 240, 200, 15)
-    draw_line(draw, 540, 200, 580, 200)
+    draw_circle_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R - 2)
+    draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y, RIGHT_EYE_X + EYE_R, EYE_Y)
 
 def draw_mouth(draw, type="straight", open_amount=0):
+    m_left = 399 - (MOUTH_W // 2)
+    m_right = 399 + (MOUTH_W // 2)
+    
     if type == "straight":
-        draw_line(draw, 360, 300, 440, 300)
+        draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
     elif type == "smile":
         # wide U shape
-        draw_arc_eye(draw, 400, 280, 50, 45, 135)
+        draw_arc_eye(draw, 399, MOUTH_Y - 20, MOUTH_W // 2, 45, 135)
     elif type == "frown":
         # wide inverted U shape
-        draw_arc_eye(draw, 400, 320, 50, 225, 315)
+        draw_arc_eye(draw, 399, MOUTH_Y + 20, MOUTH_W // 2, 225, 315)
     elif type == "surprised":
         # small circle
-        draw.ellipse([380, 290, 420, 330], fill=None, outline=LINE_COLOR, width=LINE_WIDTH)
+        draw_circle_eye(draw, 399, MOUTH_Y, 20)
     elif type == "speaking":
         # Oval mouth
         h = max(10, min(50, open_amount))
-        draw.ellipse([360, 300 - h//2, 440, 300 + h//2], fill=None, outline=LINE_COLOR, width=LINE_WIDTH)
+        draw.ellipse([m_left, MOUTH_Y - h//2, m_right, MOUTH_Y + h//2], fill=None, outline=LINE_COLOR, width=LINE_WIDTH)
     elif type == "tongue":
         # straight line with a U underneath for tongue
-        draw_line(draw, 360, 300, 440, 300)
-        draw_arc_eye(draw, 420, 300, 15, 0, 180)
+        draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
+        draw_arc_eye(draw, 399 + 15, MOUTH_Y, 15, 0, 180)
     elif type == "wavy":
         # squiggly mouth for dizzy
-        draw_arc_eye(draw, 380, 300, 20, 180, 360)
-        draw_arc_eye(draw, 420, 300, 20, 0, 180)
+        draw_arc_eye(draw, 399 - 15, MOUTH_Y, 15, 180, 360)
+        draw_arc_eye(draw, 399 + 15, MOUTH_Y, 15, 0, 180)
 
 
 # GENERATORS
