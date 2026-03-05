@@ -3,13 +3,15 @@ from PIL import Image, ImageDraw
 
 BG_COLOR = (189, 255, 203)
 LINE_COLOR = (0, 0, 0)
-MOUTH_FILL = (93, 195, 112)
+MOUTH_DARK = (41, 131, 57)
+TONGUE_COLOR = (112, 195, 112) # Slightly lighter green for tongue
+TEETH_COLOR = (255, 255, 255)
 WIDTH, HEIGHT = 800, 480
 SCALE = 4
 LINE_WIDTH = 8
 LEFT_EYE_X = 217
 RIGHT_EYE_X = 581
-EYE_Y = 198
+EYE_Y = 193 # Center moved up slightly since arcs extend above
 EYE_R = 18
 MOUTH_Y = 301
 MOUTH_W = 97
@@ -71,12 +73,12 @@ def draw_regular_eyes(draw, blink=0.0):
         draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_Y, RIGHT_EYE_X + EYE_R, EYE_Y)
     elif blink > 0.0:
         # Half blink
-        draw_arc_eye(draw, LEFT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 0, 180)
-        draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 0, 180)
+        draw_arc_eye(draw, LEFT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 345, 195)
+        draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y - int((EYE_R/2) * blink), EYE_R, 345, 195)
     else:
-        # Open eyes (U shape)
-        draw_arc_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R, 0, 180)
-        draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y, EYE_R, 0, 180)
+        # Open eyes (steeper U shape extends past 180)
+        draw_arc_eye(draw, LEFT_EYE_X, EYE_Y, EYE_R, 335, 205)
+        draw_arc_eye(draw, RIGHT_EYE_X, EYE_Y, EYE_R, 335, 205)
 
 def draw_angry_eyes(draw):
     draw_line(draw, LEFT_EYE_X - EYE_R, EYE_Y - 10, LEFT_EYE_X + EYE_R, EYE_Y + 10)
@@ -118,11 +120,37 @@ def draw_mouth(draw, type="straight", open_amount=0):
         draw_arc_eye(draw, 399, MOUTH_Y + 20, MOUTH_W // 2, 225, 315)
     elif type == "surprised":
         # small circle
-        draw_ellipse(draw, [399 - 20, MOUTH_Y - 20, 399 + 20, MOUTH_Y + 20], fill=MOUTH_FILL, outline=LINE_COLOR, width=LINE_WIDTH)
+        draw_ellipse(draw, [399 - 20, MOUTH_Y - 20, 399 + 20, MOUTH_Y + 20], fill=MOUTH_DARK, outline=LINE_COLOR, width=LINE_WIDTH)
     elif type == "speaking":
-        # Oval mouth
-        h = max(10, min(50, open_amount))
-        draw_ellipse(draw, [m_left, MOUTH_Y - h//2, m_right, MOUTH_Y + h//2], fill=MOUTH_FILL, outline=LINE_COLOR, width=LINE_WIDTH)
+        # Complex pill-shaped mouth with teeth and tongue
+        # Outer pill bounding box
+        h = max(15, min(65, open_amount))
+        
+        box = [m_left * SCALE, (MOUTH_Y - h//2) * SCALE, m_right * SCALE, (MOUTH_Y + h//2) * SCALE]
+        rad = (h//2) * SCALE
+        
+        # Draw background dark cavity pill shape
+        draw.rounded_rectangle(box, radius=rad, fill=MOUTH_DARK, outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
+        
+        # Draw teeth (white bar across the top inside of the mouth)
+        if h > 20: # Only show teeth if mouth is open wide enough
+            teeth_h = min(12, h // 3) * SCALE
+            teeth_box = [box[0] + (LINE_WIDTH*SCALE), box[1] + (LINE_WIDTH*SCALE), box[2] - (LINE_WIDTH*SCALE), box[1] + teeth_h + (LINE_WIDTH*SCALE)]
+            # Draw teeth as a rounded slice at the top
+            draw.rounded_rectangle(teeth_box, radius=rad, fill=TEETH_COLOR)
+            
+        # Draw tongue hump (light green pill slice at the bottom)
+        if h > 30:
+            tongue_h = min(20, h // 2) * SCALE
+            tongue_w = (MOUTH_W - 30) * SCALE
+            t_left = (399 * SCALE) - (tongue_w // 2)
+            t_right = (399 * SCALE) + (tongue_w // 2)
+            t_bottom = box[3] - (LINE_WIDTH*SCALE)
+            t_top = t_bottom - tongue_h
+            
+            draw.ellipse([t_left, t_top, t_right, t_bottom + (tongue_h//2)], fill=TONGUE_COLOR)
+            # Re-stroke the outer mouth line just in case tongue overflowed the bottom curve cleanly 
+            draw.rounded_rectangle(box, radius=rad, fill=None, outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
     elif type == "tongue":
         # straight line with a U underneath for tongue
         draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
@@ -148,9 +176,14 @@ def gen_idle(base_dir="faces/idle"):
 def gen_speaking(base_dir="faces/speaking"):
     ensure_dir(base_dir)
     # Animated mouth opening and closing
-    heights = [10, 30, 50, 30, 15, 40, 20]
+    heights = [15, 35, 60, 45, 25, 55, 30]
     for i, h in enumerate(heights):
-        create_face(f"{base_dir}/speaking_{i:02d}.png", lambda d, h=h: (draw_regular_eyes(d, 0.0), draw_mouth(d, "speaking", h)))
+        # Speaking BMO has fully open circular eyes, not U-shapes
+        def draw_spk(d, hm=h):
+            draw_circle_eye(d, LEFT_EYE_X, EYE_Y, 12)
+            draw_circle_eye(d, RIGHT_EYE_X, EYE_Y, 12)
+            draw_mouth(d, "speaking", hm)
+        create_face(f"{base_dir}/speaking_{i:02d}.png", draw_spk)
 
 def gen_happy(base_dir="faces/happy"):
     ensure_dir(base_dir)
