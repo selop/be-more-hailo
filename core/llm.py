@@ -1,16 +1,127 @@
+import base64
+import os
 import requests
 import logging
 import re
 import json
-from .config import LLM_URL, LLM_MODEL, FAST_LLM_MODEL, VISION_MODEL, get_system_prompt
+import urllib.parse
+import numpy as np
+from .config import LLM_URL, LLM_MODEL, FAST_LLM_MODEL, VISION_MODEL, VLM_HEF_PATH, get_system_prompt
 from .tts import add_pronunciation
 from .search import search_web
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------- #
+#  Hailo VLM (Vision Language Model) singleton
+# --------------------------------------------------------------------------- #
+# Lazy-loaded on first image analysis request.  Kept alive so subsequent
+# requests don't pay the ~3 s init cost again.
+_vlm_instance = None
+_vlm_vdevice = None
+
+
+def _get_vlm():
+    """Return a (vlm, frame_shape, frame_dtype) tuple, initialising on first call."""
+    global _vlm_instance, _vlm_vdevice
+
+    if _vlm_instance is not None:
+        shape = _vlm_instance.input_frame_shape()
+        dtype = _vlm_instance.input_frame_format_type()
+        return _vlm_instance, shape, dtype
+
+    hef = VLM_HEF_PATH
+    if not os.path.isabs(hef):
+        # Resolve relative to project root (where the scripts live)
+        hef = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), hef)
+
+    if not os.path.exists(hef):
+        raise FileNotFoundError(f"VLM HEF not found at {hef}. Run setup.sh to download it.")
+
+    from hailo_platform import VDevice
+    from hailo_platform.genai import VLM
+
+    logger.info(f"Initialising Hailo VLM from {hef} ...")
+    _vlm_vdevice = VDevice()
+    _vlm_instance = VLM(_vlm_vdevice, hef)
+    shape = _vlm_instance.input_frame_shape()
+    dtype = _vlm_instance.input_frame_format_type()
+    logger.info(f"VLM ready — frame shape {shape}, dtype {dtype}")
+    return _vlm_instance, shape, dtype
+
+
+def _decode_image_to_frame(image_b64: str, target_shape, target_dtype=np.uint8):
+    """Decode a base64 JPEG/PNG into a numpy array matching VLM input requirements."""
+    import cv2
+
+    raw = base64.b64decode(image_b64)
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Failed to decode image from base64 data")
+
+    # OpenCV loads BGR; VLM expects RGB
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    h, w, c = target_shape
+    if img.shape[0] != h or img.shape[1] != w:
+        img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return img.astype(target_dtype)
+
 # Keep at most this many messages (plus the system prompt) to avoid
 # unbounded memory growth on memory-constrained devices like a Pi.
 MAX_HISTORY_MESSAGES = 20
+
+_DISPLAY_IMAGE_KEYWORDS = [
+    "show me a picture", "show me an image", "show me a photo",
+    "show a picture", "show an image", "show a photo",
+    "display a picture", "display an image", "display a photo",
+    "picture of", "image of", "photo of",
+    "generate an image", "generate a picture",
+    "draw me", "draw a",
+]
+
+# Phrases that indicate the model is regurgitating system prompt instructions
+_PROMPT_LEAK_PATTERNS = [
+    re.compile(r'CRIT(?:IC)?AL:.*?JSON', re.IGNORECASE | re.DOTALL),
+    re.compile(r'you MUST output.*?JSON', re.IGNORECASE | re.DOTALL),
+    re.compile(r'output (?:exactly )?this JSON', re.IGNORECASE),
+    re.compile(r'If the user asks.*?(?:output|JSON)', re.IGNORECASE | re.DOTALL),
+    re.compile(r'Replace YOUR_PROMPT_HERE', re.IGNORECASE),
+    re.compile(r'Valid emotions are:', re.IGNORECASE),
+]
+
+
+def _build_display_image_action(user_text: str) -> str:
+    """Extract the subject from user text and return a display_image JSON action."""
+    # Strip common prefixes to get the image subject
+    subject = user_text
+    for prefix in ["show me a picture of", "show me an image of", "show me a photo of",
+                    "show a picture of", "show an image of", "show a photo of",
+                    "display a picture of", "display an image of", "display a photo of",
+                    "generate an image of", "generate a picture of",
+                    "draw me a", "draw me an", "draw me", "draw a", "draw an",
+                    "picture of", "image of", "photo of"]:
+        lower = subject.lower()
+        if lower.startswith(prefix):
+            subject = subject[len(prefix):].strip()
+            break
+    # Remove trailing punctuation
+    subject = subject.rstrip("?.!")
+    prompt = urllib.parse.quote(subject.strip() or "something fun")
+    return json.dumps({"action": "display_image", "image_url": f"https://image.pollinations.ai/prompt/{prompt}"})
+
+
+def _strip_prompt_leakage(content: str) -> str:
+    """Remove text that looks like the model echoing system prompt instructions."""
+    for pat in _PROMPT_LEAK_PATTERNS:
+        # Remove the matched pattern and everything after it (it's usually trailing noise)
+        match = pat.search(content)
+        if match:
+            content = content[:match.start()].strip()
+    return content
+
 
 class Brain:
     def __init__(self):
@@ -39,6 +150,13 @@ class Brain:
         ]
         if any(kw in lower_text for kw in camera_keywords):
             action = '{"action": "take_photo"}'
+            self.history.append({"role": "assistant", "content": action})
+            return action
+
+        # Pre-LLM display_image check — handle image generation requests
+        # directly instead of relying on the small model to emit correct JSON
+        if any(kw in lower_text for kw in _DISPLAY_IMAGE_KEYWORDS):
+            action = _build_display_image_action(user_text)
             self.history.append({"role": "assistant", "content": action})
             return action
 
@@ -147,8 +265,15 @@ class Brain:
                     # Remove the tag from the spoken content
                     content = re.sub(r'!PRONOUNCE:.*', '', content, flags=re.IGNORECASE).strip()
 
+                # Strip any system prompt leakage from the response
+                content = _strip_prompt_leakage(content)
+
                 # Ensure BMO is spelled correctly in text responses
                 content = re.sub(r'\bBeemo\b', 'BMO', content, flags=re.IGNORECASE)
+
+                # Fallback if filtering left nothing useful
+                if not content.strip():
+                    content = "BMO is here! How can I help?"
 
                 self.history.append({"role": "assistant", "content": content})
 
@@ -196,6 +321,13 @@ class Brain:
         ]
         if any(kw in lower_text for kw in camera_keywords):
             action = '{"action": "take_photo"}'
+            self.history.append({"role": "assistant", "content": action})
+            yield action
+            return
+
+        # Pre-LLM display_image check
+        if any(kw in lower_text for kw in _DISPLAY_IMAGE_KEYWORDS):
+            action = _build_display_image_action(user_text)
             self.history.append({"role": "assistant", "content": action})
             yield action
             return
@@ -276,9 +408,12 @@ class Brain:
                                 
                                 # If buffer ends with punctuation or newline, yield it
                                 if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
+                                    # Strip system prompt leakage
+                                    cleaned = _strip_prompt_leakage(buffer)
                                     # Ensure BMO spelling before yielding
-                                    out_chunk = re.sub(r'\bBeemo\b', 'BMO', buffer, flags=re.IGNORECASE)
-                                    yield out_chunk
+                                    out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
+                                    if out_chunk.strip():
+                                        yield out_chunk
                                     buffer = ""
                                     
                             except json.JSONDecodeError:
@@ -286,8 +421,10 @@ class Brain:
                                 
                     # Yield any remaining buffer
                     if buffer.strip():
-                        out_chunk = re.sub(r'\bBeemo\b', 'BMO', buffer, flags=re.IGNORECASE)
-                        yield out_chunk
+                        cleaned = _strip_prompt_leakage(buffer)
+                        out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
+                        if out_chunk.strip():
+                            yield out_chunk
                         
                     # Handle json actions at the very end if applicable
                     json_match = re.search(r'\{.*?\}', full_content, re.DOTALL)
@@ -327,52 +464,59 @@ class Brain:
 
     def analyze_image(self, image_base64: str, user_text: str) -> str:
         """
-        Send an image and text to the vision model (e.g., moondream) and get a response.
+        Analyse an image using the Hailo VLM (Qwen2-VL-2B) running directly
+        on the NPU via the HailoRT Python API.  Falls back to a polite error
+        message if the HEF isn't available or the hardware can't be reached.
         """
-        # Strip data URI prefix if present
+        # Strip data URI prefix if present (browser sends "data:image/jpeg;base64,...")
         if "," in image_base64:
             image_base64 = image_base64.split(",")[1]
-            
+
         # We don't append the image to the main history to save context window,
         # but we do append the user's question and the assistant's answer.
         self.history.append({"role": "user", "content": user_text})
-        
-        # Create a temporary message list for the vision model
-        vision_messages = [
-            {"role": "system", "content": "You are BMO, a helpful robot assistant. Describe what you see in the image concisely and conversationally."},
-            {
-                "role": "user",
-                "content": user_text,
-                "images": [image_base64]
-            }
-        ]
-        
-        payload = {
-            "model": VISION_MODEL,
-            "messages": vision_messages,
-            "stream": False
-        }
-        
+
         try:
-            logger.info(f"Sending image to Vision Model ({VISION_MODEL}) at {LLM_URL}")
-            response = requests.post(LLM_URL, json=payload, timeout=120) # Vision takes longer
-            
-            if response.status_code == 200:
-                data = response.json()
-                content = data.get("message", {}).get("content", "")
-                
-                # Clean up any markdown or weird formatting
-                content = content.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
-                
-                self.history.append({"role": "assistant", "content": content})
-                return content
-            else:
-                logger.error(f"Vision Model Error: {response.status_code} - {response.text}")
-                return "I tried to look, but my eyes aren't working right now."
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Vision Connection Error: {e}")
-            return "I couldn't connect to my vision processor."
+            vlm, frame_shape, frame_dtype = _get_vlm()
+
+            # Decode the base64 image into a numpy frame the VLM expects
+            frame = _decode_image_to_frame(image_base64, frame_shape, frame_dtype)
+
+            # Build the structured prompt expected by the Qwen2-VL model
+            prompt = [
+                {"role": "system", "content": [
+                    {"type": "text", "text": "You are BMO, a helpful robot assistant. Describe what you see concisely and conversationally in English."}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": user_text or "What do you see in this image?"}
+                ]}
+            ]
+
+            logger.info("Running VLM inference on Hailo NPU ...")
+            vlm.clear_context()
+            content = vlm.generate_all(
+                prompt=prompt,
+                frames=[frame],
+                max_generated_tokens=150,
+                temperature=0.4,
+            )
+
+            # Clean up any smart quotes, stop tokens, or stray formatting
+            content = content.replace('\u201c', '"').replace('\u201d', '"')
+            content = content.replace('\u2018', "'").replace('\u2019', "'")
+            for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+                content = content.replace(tok, "")
+            content = content.strip()
+
+            logger.info(f"VLM response ({len(content)} chars): {content[:120]}...")
+
+            self.history.append({"role": "assistant", "content": content})
+            return content
+
+        except FileNotFoundError as e:
+            logger.warning(f"VLM HEF not found: {e}")
+            return "BMO's vision model isn't installed yet. Run setup.sh to download it!"
         except Exception as e:
-            logger.error(f"Vision Exception: {e}")
-            return "I'm having trouble seeing right now."
+            logger.error(f"VLM Exception: {e}", exc_info=True)
+            return "I tried to look, but my eyes aren't working right now."

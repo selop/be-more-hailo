@@ -1,18 +1,23 @@
 #!/bin/bash
 
+BMO_USER="$USER"
+BMO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "Setting up BMO background services..."
+echo "  User: $BMO_USER"
+echo "  Directory: $BMO_DIR"
 
 # 1. Create the Hailo-Ollama Service
 echo "Creating bmo-ollama.service..."
-cat << 'EOF' | sudo tee /etc/systemd/system/bmo-ollama.service
+cat << EOF | sudo tee /etc/systemd/system/bmo-ollama.service
 [Unit]
 Description=BMO Hailo Ollama Service
 After=network.target
 
 [Service]
 Type=simple
-User=clevercode
-WorkingDirectory=/home/clevercode/be-more-agent
+User=$BMO_USER
+WorkingDirectory=$BMO_DIR
 Environment="OLLAMA_HOST=0.0.0.0:8000"
 ExecStart=/usr/bin/hailo-ollama serve
 Restart=always
@@ -24,7 +29,7 @@ EOF
 
 # 2. Create the Web UI Service
 echo "Creating bmo-web.service..."
-cat << 'EOF' | sudo tee /etc/systemd/system/bmo-web.service
+cat << EOF | sudo tee /etc/systemd/system/bmo-web.service
 [Unit]
 Description=BMO Web UI Service
 After=network.target bmo-ollama.service
@@ -32,9 +37,9 @@ Requires=bmo-ollama.service
 
 [Service]
 Type=simple
-User=clevercode
-WorkingDirectory=/home/clevercode/be-more-agent
-ExecStart=/bin/bash /home/clevercode/be-more-agent/start_web.sh
+User=$BMO_USER
+WorkingDirectory=$BMO_DIR
+ExecStart=/bin/bash $BMO_DIR/start_web.sh
 Restart=always
 RestartSec=5
 
@@ -44,8 +49,8 @@ EOF
 
 # 3. Fix Permissions
 echo "Fixing permissions for the web app..."
-sudo chown -R clevercode:clevercode /home/clevercode/be-more-agent
-sudo chmod +x /home/clevercode/be-more-agent/*.sh
+sudo chown -R "$BMO_USER:$BMO_USER" "$BMO_DIR"
+sudo chmod +x "$BMO_DIR"/*.sh
 
 # 4. Reload systemd, enable, and start the services
 echo "Reloading systemd daemon..."

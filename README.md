@@ -16,7 +16,7 @@ This fork adds a browser-based **web interface**, a shared `core/` module layer 
 | Component | Where it runs | Notes |
 |-----------|--------------|-------|
 | LLM (`qwen2.5-instruct:1.5b`) | Hailo-10H NPU | via `hailo-ollama` |
-| Vision (`qwen2-vl-instruct:2b`) | Hailo-10H NPU | optional; requires camera |
+| Vision (`Qwen2-VL-2B-Instruct`) | Hailo-10H NPU | via HailoRT Python API; optional, requires camera |
 | STT (Whisper base.en) | CPU | via `whisper.cpp`; NPU path causes PCIe timeouts |
 | TTS (Piper) | CPU | streams sentence-by-sentence while LLM generates |
 | Wake word (openWakeWord) | CPU | "Hey BMO" custom model |
@@ -90,7 +90,7 @@ be-more-agent/
 ├── requirements.txt        # Python dependencies
 ├── wakeword.onnx           # OpenWakeWord model
 ├── piper/                  # Piper TTS engine and voice model
-├── models/                 # Whisper model weights
+├── models/                 # Whisper model weights + VLM HEF (auto-downloaded)
 ├── whisper.cpp/            # Compiled whisper.cpp STT binary
 ├── generate_faces.py       # Procedural face generator (4x supersampled)
 ├── faces/                  # Generated face animations (13 expression states)
@@ -119,7 +119,7 @@ be-more-agent/
 
 - Raspberry Pi OS (64-bit, current stable)
 - `hailo-h10-all` installed — the setup script handles this, but if installing manually: `sudo apt install hailo-h10-all`
-- `hailo-ollama` installed and running — follow [Hailo's documentation](https://github.com/hailo-ai/hailo-ollama) for setup
+- `hailo-ollama` — the setup script builds this from source automatically. If installing manually, see [hailo_model_zoo_genai](https://github.com/hailo-ai/hailo_model_zoo_genai)
 
 ### Automated install
 
@@ -130,11 +130,15 @@ cd be-more-agent
 
 The script handles everything:
 - Installs system packages including `libcamera-apps` for camera support
+- Fixes the Hailo driver conflict (blacklists the legacy `hailo_pci` module)
+- Builds and installs `hailo-ollama` from source if not already present
 - Downloads and extracts the Piper TTS engine
 - Clones and compiles `whisper.cpp`
 - Downloads the `ggml-base.en` Whisper model
 - Creates a Python virtual environment and installs dependencies
-- Pulls `qwen2.5-instruct:1.5b` (LLM) and `qwen2-vl-instruct:2b` (vision) via `hailo-ollama`
+- Pulls `qwen2.5-instruct:1.5b` (LLM) via `hailo-ollama`
+- Downloads the `Qwen2-VL-2B-Instruct` VLM HEF directly from Hailo's CDN (~2.2 GB)
+- Enables system site-packages in the venv so Python can use `hailo_platform`
 - Checks camera availability and lets you know if anything's missing
 
 ### Manual install
@@ -181,7 +185,9 @@ All settings live in `core/config.py`. The most commonly changed values:
 # LLM models (must be pulled via hailo-ollama)
 LLM_MODEL       = "qwen2.5-instruct:1.5b"
 FAST_LLM_MODEL  = "qwen2.5-instruct:1.5b"
-VISION_MODEL    = "qwen2-vl-instruct:2b"
+
+# Vision model — runs directly via HailoRT Python API (not hailo-ollama)
+VLM_HEF_PATH    = "./models/Qwen2-VL-2B-Instruct.hef"
 
 # Audio device for local hardware playback (run `aplay -l` to find yours)
 # The USB speaker is typically on a different ALSA card from the mic — check both.
@@ -224,9 +230,9 @@ If you have a Raspberry Pi Camera Module connected:
    ```bash
    sudo apt install -y libcamera-apps
    ```
-3. Say something like "Hey BMO, take a photo and tell me what you see" — the agent captures a frame with `rpicam-still` and sends it to the vision model (`qwen2-vl-instruct:2b`) on the NPU
+3. Say something like "Hey BMO, take a photo and tell me what you see" — the agent captures a frame with `rpicam-still` and sends it to the vision model (`Qwen2-VL-2B-Instruct`) running natively on the NPU via the HailoRT Python API
 
-If no camera is found, BMO will say so rather than crashing.
+The VLM runs as a separate process from the LLM server. Hailo's VDevice sharing allows both to coexist on the same NPU without conflicts. If the VLM HEF file isn't installed, BMO will politely say so rather than crashing.
 
 ---
 
@@ -276,6 +282,60 @@ BMO stays quiet during:
 - **Recent interaction** (within 60 seconds of your last conversation)
 
 This all runs locally — search results go through DuckDuckGo and the LLM processes them on the Hailo NPU.
+
+---
+
+## Troubleshooting
+
+**LLM shows as offline / can't connect to port 8000**
+
+Check if `hailo-ollama` is running:
+```bash
+sudo systemctl status bmo-ollama
+```
+If the service isn't set up yet, start it manually:
+```bash
+export OLLAMA_HOST=0.0.0.0:8000
+hailo-ollama serve
+```
+If `hailo-ollama` isn't found, re-run `./setup.sh` — it will build and install it from source.
+
+**Hailo NPU not detected (`/dev/hailo0` missing)**
+
+This is usually caused by a driver conflict. The system ships with both `hailo_pci` (Hailo-8) and `hailo1x_pci` (Hailo-10H) drivers. If the old one loads first, it blocks the new one from creating the device node. Fix it by blacklisting the old driver:
+```bash
+echo "blacklist hailo_pci" | sudo tee /etc/modprobe.d/blacklist-hailo-legacy.conf
+sudo rmmod hailo1x_pci 2>/dev/null; sudo rmmod hailo_pci 2>/dev/null
+sudo modprobe hailo1x_pci
+ls /dev/hailo0  # should now exist
+```
+The setup script handles this automatically, but if you installed manually you may need to do it yourself.
+
+**Inference fails with `HAILO_OUT_OF_PHYSICAL_DEVICES`**
+
+This means `/dev/hailo0` doesn't exist — see the fix above. Another cause is a process already holding the device; check with `lsof /dev/hailo0`.
+
+**VLM fails with `HAILO_INVALID_OPERATION` / `HailoRTStatusException: 6`**
+
+This usually means the VLM HEF file was compiled for a different HailoRT version. The HEF must match your installed runtime:
+```bash
+dpkg -l | grep hailort  # check your version (e.g. 5.1.1)
+```
+Re-download the matching HEF:
+```bash
+HAILORT_VER=$(dpkg-query -W -f='${Version}' h10-hailort)
+wget -O models/Qwen2-VL-2B-Instruct.hef \
+    "https://dev-public.hailo.ai/v${HAILORT_VER}/blob/Qwen2-VL-2B-Instruct.hef"
+```
+
+**Camera vision says "my eyes aren't working"**
+
+If the VLM HEF is present but inference still fails, check that `hailo_platform` is importable:
+```bash
+source venv/bin/activate
+python3 -c "from hailo_platform.genai import VLM; print('OK')"
+```
+If it fails, ensure system site-packages are enabled: `grep include-system venv/pyvenv.cfg` should say `true`.
 
 ---
 

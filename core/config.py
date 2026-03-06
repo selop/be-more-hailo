@@ -12,7 +12,11 @@ load_dotenv()
 LLM_URL = "http://127.0.0.1:8000/api/chat"
 LLM_MODEL = "qwen2.5-instruct:1.5b" # Native Hailo model for all queries
 FAST_LLM_MODEL = "qwen2.5-instruct:1.5b" # Unify models to prevent NPU swap crashing
-VISION_MODEL = "qwen2-vl-instruct:2b" # Native Hailo Vision model for Pi
+VISION_MODEL = "qwen2-vl-instruct:2b" # Legacy Ollama name (unused — VLM runs via HailoRT directly)
+
+# VLM (Vision Language Model) Settings — uses HailoRT Python API directly
+# The HEF file is a precompiled model binary from Hailo's model zoo
+VLM_HEF_PATH = os.environ.get("VLM_HEF_PATH", "./models/Qwen2-VL-2B-Instruct.hef")
 
 # Gemini Settings
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "") # Add your Gemini API key to a .env file
@@ -49,17 +53,10 @@ def get_system_prompt():
         "acknowledge it naturally and then append exactly this tag at the very end of your response: "
         "!PRONOUNCE: word=phonetic\n"
         "IMPORTANT: Do NOT use the !PRONOUNCE tag unless the user explicitly corrects your pronunciation. "
-        "CRITICAL: If you want to show a facial emotion, output EXACTLY this JSON format and nothing else in that block:\n"
-        '{"action": "set_expression", "value": "happy"}\n'
-        "Valid emotions are: happy, sad, angry, surprised, sleepy, dizzy, cheeky, heart, starry_eyed, confused. Do not use this for every response, only when expressing a strong emotion.\n"
-        "CRITICAL: If the user asks you to look at something, take a photo, or asks what you see, "
-        "you MUST output exactly this JSON format and nothing else: "
-        '{"action": "take_photo"}\n'
-        "CRITICAL: If the user asks you to show a picture or image of something, "
-        "you MUST output a conversational response followed by exactly this JSON format: "
-        '{"action": "display_image", "image_url": "https://image.pollinations.ai/prompt/YOUR_PROMPT_HERE"}\n'
-        "Replace YOUR_PROMPT_HERE with a detailed description of the image they want to see, with spaces replaced by %20.\n"
-        "Do not include any conversational text before or after the JSON block when taking photos or displaying images."
+        "When feeling a strong emotion, you may include this JSON on its own line: "
+        '{"action": "set_expression", "value": "EMOTION"} '
+        "where EMOTION is one of: happy, sad, angry, surprised, sleepy, dizzy, cheeky, heart, starry_eyed, confused. "
+        "Only use this occasionally for strong emotions, not every response."
     )
 
 
