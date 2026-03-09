@@ -149,18 +149,19 @@ def draw_cheeky_eyes(draw):
     draw_circle_eye(draw, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
     draw_line(draw, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y)
 
-def draw_mouth(draw, type="straight", open_amount=0):
-    m_left = 399 - (MOUTH_W // 2)
-    m_right = 399 + (MOUTH_W // 2)
+def draw_mouth(draw, type="straight", open_amount=0, width_param=MOUTH_W):
+    # width_param allows overriding the default MOUTH_W for dynamic shape progression (visemes)
+    m_left = 399 - (width_param // 2)
+    m_right = 399 + (width_param // 2)
     
     if type == "straight":
         draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
     elif type == "smile":
         # wide U shape
-        draw_arc_eye(draw, 399, MOUTH_Y - 20, MOUTH_W // 2, 45, 135)
+        draw_arc_eye(draw, 399, MOUTH_Y - 20, width_param // 2, 45, 135)
     elif type == "frown":
         # wide inverted U shape
-        draw_arc_eye(draw, 399, MOUTH_Y + 20, MOUTH_W // 2, 225, 315)
+        draw_arc_eye(draw, 399, MOUTH_Y + 20, width_param // 2, 225, 315)
     elif type == "surprised":
         # small circle
         draw_ellipse(draw, [399 - 20, MOUTH_Y - 20, 399 + 20, MOUTH_Y + 20], fill=MOUTH_DARK, outline=LINE_COLOR, width=LINE_WIDTH)
@@ -185,7 +186,7 @@ def draw_mouth(draw, type="straight", open_amount=0):
         # Draw tongue hump (light green pill slice at the bottom)
         if h > 30:
             tongue_h = min(20, h // 2) * SCALE
-            tongue_w = (MOUTH_W - 30) * SCALE
+            tongue_w = (width_param - 30) * SCALE
             t_left = (399 * SCALE) - (tongue_w // 2)
             t_right = (399 * SCALE) + (tongue_w // 2)
             t_bottom = box[3] - (LINE_WIDTH*SCALE)
@@ -239,30 +240,31 @@ def gen_idle(base_dir="faces/idle"):
 
 def gen_speaking(base_dir="faces/speaking"):
     ensure_dir(base_dir)
-    # Natural speech rhythm: 0 = closed mouth (straight line), >0 = open speaking mouth
-    # Pattern simulates syllable cadence with word-boundary pauses for realistic lip-sync
-    heights = [
-        0,          # 00: closed (clean start / rest)
-        35, 50,     # 01-02: first syllable
-        0,          # 03: brief close between syllables
-        45, 30,     # 04-05: second syllable
-        55, 25,     # 06-07: third syllable (emphasis)
-        0,          # 08: word boundary pause
-        40, 60,     # 09-10: stressed syllable
-        20,         # 11: quick consonant
-        45, 30,     # 12-13: next syllable
-        0,          # 14: word boundary pause
-        35, 50, 20, # 15-17: trailing word
-        0,          # 18: closed (clean loop back to start)
+    # Natural speech rhythm: (height, width)
+    # Simulates vowel shapes (tall, narrow) vs consonants (short, wide)
+    shapes = [
+        (0, MOUTH_W),       # 00: closed
+        (20, 80), (35, 70), # 01-02: opening
+        (50, 60),           # 03: tall "O" vowel
+        (25, 85),           # 04: wide consonant slit
+        (45, 65),           # 05: mid open
+        (0, MOUTH_W),       # 06: word boundary
+        (30, 75), (55, 55), # 07-08: stressed tall vowel
+        (20, 90),           # 09: wide consonant
+        (40, 70), (25, 80), # 10-11: trailing off
+        (0, MOUTH_W),       # 12: closed
+        (30, 80), (45, 60), # 13-14: second phrase start
+        (35, 75),           # 15: mid
+        (0, MOUTH_W)        # 16: closed loop back
     ]
-    for i, h in enumerate(heights):
-        def draw_spk(d, hm=h):
+    for i, (h, w) in enumerate(shapes):
+        def draw_spk(d, hm=h, wm=w):
             draw_circle_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 1)
             draw_circle_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, EYE_R - 1)
             if hm == 0:
-                draw_mouth(d, "straight")
+                draw_mouth(d, "straight", width_param=wm)
             else:
-                draw_mouth(d, "speaking", hm)
+                draw_mouth(d, "speaking", hm, width_param=wm)
         create_face(f"{base_dir}/speaking_{i:02d}.png", draw_spk)
 
 def gen_happy(base_dir="faces/happy"):
