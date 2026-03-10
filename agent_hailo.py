@@ -638,7 +638,39 @@ class BotGUI:
                             with urllib.request.urlopen(req) as u:
                                 raw_data = u.read()
                             from io import BytesIO
-                            img = Image.open(BytesIO(raw_data)).resize((self.BG_WIDTH, self.BG_HEIGHT))
+                            from PIL import ImageOps, ImageDraw
+                            
+                            def apply_bmo_border(pil_img):
+                                # Resize and crop image to fit inside the inner LCD screen
+                                lcd_w, lcd_h = self.BG_WIDTH - 60, self.BG_HEIGHT - 60
+                                # Cover/resize logic
+                                img_ratio = pil_img.width / pil_img.height
+                                target_ratio = lcd_w / lcd_h
+                                if img_ratio > target_ratio:
+                                    # Image is wider, scale to height and crop width
+                                    new_h = lcd_h
+                                    new_w = int(new_h * img_ratio)
+                                else:
+                                    # Image is taller, scale to width and crop height
+                                    new_w = lcd_w
+                                    new_h = int(new_w / img_ratio)
+                                
+                                pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                                # Crop center
+                                left = (new_w - lcd_w) / 2
+                                top = (new_h - lcd_h) / 2
+                                right = (new_w + lcd_w) / 2
+                                bottom = (new_h + lcd_h) / 2
+                                pil_img = pil_img.crop((left, top, right, bottom))
+                                
+                                # Add inner thick dark LCD bezel
+                                pil_img = ImageOps.expand(pil_img, border=10, fill="#1c201a")
+                                # Add BMO Teal outer casing
+                                pil_img = ImageOps.expand(pil_img, border=20, fill="#38b5a0")
+                                return pil_img
+
+                            img = Image.open(BytesIO(raw_data))
+                            img = apply_bmo_border(img)
                             self.current_display_image = ImageTk.PhotoImage(img)
                             self.background_label.config(image=self.current_display_image)
                         except Exception as e:
@@ -728,7 +760,9 @@ class BotGUI:
                 "Based on this info, say your thoughts out loud. CRITICALLY: You must explicitly state the core detail "
                 "you found (e.g., actually tell the joke, state the specific weather details, or share the exact fact) "
                 "and then offer a charming opinion on it. Talk for 2 to 3 sentences. Be charming and curious. "
-                "Do NOT use JSON. Do NOT ask questions to the user.\n\n"
+                "If the topic is highly visual (like a nebula, space, or an animal), generate an image URL using this "
+                "EXACT JSON format anywhere in your response: `{\"action\": \"display_image\", \"image_url\": \"https://image.pollinations.ai/prompt/URL_ENCODED_SUBJECT\"}`. "
+                "Do NOT use JSON unless you are creating an image. Do NOT ask questions to the user.\n\n"
                 f"Info: {search_result[:800]}"
             )
             payload = {
@@ -749,7 +783,7 @@ class BotGUI:
                     content = resp.json().get("message", {}).get("content", "").strip()
                     # Filter out error-like responses the model might echo
                     if content and "connect" not in content.lower() and "error" not in content.lower():
-                        return content[:200]
+                        return content
                 else:
                     print(f"[SCREENSAVER] LLM returned status {resp.status_code}")
             except http_requests.exceptions.RequestException as e:
@@ -791,6 +825,70 @@ class BotGUI:
                                     phrase = generate_thought(search_result)
                                     if phrase:
                                         print(f"[SCREENSAVER] BMO muses: {phrase}")
+                                        
+                                        # Check for image generation action
+                                        img_url = None
+                                        json_match = re.search(r'\{.*?\}', phrase, re.DOTALL)
+                                        if json_match:
+                                            try:
+                                                action_data = json.loads(json_match.group(0))
+                                                if action_data.get("action") == "display_image" and action_data.get("image_url"):
+                                                    img_url = action_data.get("image_url")
+                                                    phrase = phrase.replace(json_match.group(0), '').strip()
+                                            except Exception as e:
+                                                pass
+                                                
+                                        # Speak out loud
+                                        if phrase:
+                                            self.speak(phrase, msg="Pondering...")
+                                            
+                                        # Display the image if an action was yielded
+                                        if img_url:
+                                            self.set_state(BotStates.DISPLAY_IMAGE, "Visualizing...")
+                                            try:
+                                                req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
+                                                with urllib.request.urlopen(req) as u:
+                                                    raw_data = u.read()
+                                                from io import BytesIO
+                                                from PIL import ImageOps
+                                                
+                                                # Need to replicate apply_bmo_border for screensaver
+                                                def apply_bmo_border(pil_img):
+                                                    lcd_w, lcd_h = self.BG_WIDTH - 60, self.BG_HEIGHT - 60
+                                                    img_ratio = pil_img.width / pil_img.height
+                                                    target_ratio = lcd_w / lcd_h
+                                                    if img_ratio > target_ratio:
+                                                        new_h = lcd_h
+                                                        new_w = int(new_h * img_ratio)
+                                                    else:
+                                                        new_w = lcd_w
+                                                        new_h = int(new_w / img_ratio)
+                                                    pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                                                    left = (new_w - lcd_w) / 2
+                                                    top = (new_h - lcd_h) / 2
+                                                    right = (new_w + lcd_w) / 2
+                                                    bottom = (new_h + lcd_h) / 2
+                                                    pil_img = pil_img.crop((left, top, right, bottom))
+                                                    pil_img = ImageOps.expand(pil_img, border=10, fill="#1c201a")
+                                                    pil_img = ImageOps.expand(pil_img, border=20, fill="#38b5a0")
+                                                    return pil_img
+
+                                                img = Image.open(BytesIO(raw_data))
+                                                img = apply_bmo_border(img)
+                                                self.current_display_image = ImageTk.PhotoImage(img)
+                                                self.background_label.config(image=self.current_display_image)
+                                                
+                                                # Show the image for 10 seconds, then revert to screensaver
+                                                time.sleep(10)
+                                                if self.current_state == BotStates.DISPLAY_IMAGE:
+                                                    self.set_state(BotStates.SCREENSAVER, "Sleeping...")
+                                                
+                                            except Exception as e:
+                                                print(f"Screensaver Image Error: {e}")
+                                                if self.current_state == BotStates.DISPLAY_IMAGE:
+                                                    self.set_state(BotStates.SCREENSAVER, "Sleeping...")
+                                        
+                                        self.last_screensaver_audio_time = time.time()
                                         break
                                     print(f"[SCREENSAVER] Attempt {attempt + 1} failed, retrying...")
                                     time.sleep(5)
