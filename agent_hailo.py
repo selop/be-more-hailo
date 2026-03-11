@@ -869,7 +869,17 @@ class BotGUI:
             if time.time() - self.last_state_change < 60:
                 continue
                 
-            # ~2% chance every 30 seconds = roughly once every 25-30 minutes
+            # Random visual-only boredom animations (~10% chance every 30s)
+            if random.random() < 0.10:
+                expr = random.choice([BotStates.HEART, BotStates.SLEEPY, BotStates.STARRY_EYED, BotStates.DIZZY])
+                self.set_state(expr, "Zzz..." if expr == BotStates.SLEEPY else "...")
+                # Hold the expression for 4 seconds, then revert to Screensaver
+                def revert():
+                    if self.current_state == expr:
+                        self.set_state(BotStates.SCREENSAVER, "Screensaver...")
+                self.master.after(4000, revert)
+                
+            # ~2% chance every 30 seconds = roughly once every 25-30 minutes for audio vocalizations
             if random.random() < 0.02:
                 # Ensure at least 20 minutes since last utterance
                 if time.time() - self.last_screensaver_audio_time > 1200:
