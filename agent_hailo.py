@@ -73,6 +73,11 @@ class BotStates:
     CONFUSED = "confused"
     SHHH = "shhh"
     JAMMING = "jamming"
+    FOOTBALL = "football"
+    DETECTIVE = "detective"
+    SIR_MANO = "sir_mano"
+    LOW_BATTERY = "low_battery"
+    BEE = "bee"
 
 class BotGUI:
 
@@ -222,7 +227,7 @@ class BotGUI:
     def load_animations(self):
         base = "faces"
         all_face_paths = []
-        for state in [BotStates.IDLE, BotStates.LISTENING, BotStates.THINKING, BotStates.SPEAKING, BotStates.ERROR, BotStates.HAPPY, BotStates.SAD, BotStates.ANGRY, BotStates.SURPRISED, BotStates.SLEEPY, BotStates.DIZZY, BotStates.CHEEKY, BotStates.HEART, BotStates.STARRY_EYED, BotStates.CONFUSED, BotStates.SHHH, BotStates.JAMMING]:
+        for state in [BotStates.IDLE, BotStates.LISTENING, BotStates.THINKING, BotStates.SPEAKING, BotStates.ERROR, BotStates.HAPPY, BotStates.SAD, BotStates.ANGRY, BotStates.SURPRISED, BotStates.SLEEPY, BotStates.DIZZY, BotStates.CHEEKY, BotStates.HEART, BotStates.STARRY_EYED, BotStates.CONFUSED, BotStates.SHHH, BotStates.JAMMING, BotStates.FOOTBALL, BotStates.DETECTIVE, BotStates.SIR_MANO, BotStates.LOW_BATTERY, BotStates.BEE]:
             path = os.path.join(base, state)
             self.animations[state] = []
             if os.path.exists(path):
@@ -237,7 +242,8 @@ class BotGUI:
         SCREENSAVER_STATES = [
             "idle", "happy", "sleepy", "heart", "starry_eyed",
             "cheeky", "dizzy", "confused",
-            "daydream", "bored", "jamming", "curious"
+            "daydream", "bored", "jamming", "curious",
+            "football", "detective", "sir_mano", "low_battery", "bee"
         ]
         self.screensaver_sequences = []  # List of (state_name, [frames])
         for state_dir in SCREENSAVER_STATES:
@@ -926,6 +932,26 @@ class BotGUI:
                     if self.current_state == expr:
                         self.set_state(BotStates.SCREENSAVER, "Screensaver...")
                 self.master.after(4000, revert)
+                
+            # Random Persona Gags (~5% chance every 30s)
+            elif random.random() < 0.05:
+                persona = random.choice([BotStates.FOOTBALL, BotStates.DETECTIVE, BotStates.SIR_MANO, BotStates.LOW_BATTERY, BotStates.BEE])
+                self.set_state(persona, "...")
+                
+                # Play the matching sound effect
+                sound_file = os.path.join("sounds", "personas", f"{persona}.wav")
+                if not self.is_muted and os.path.exists(sound_file):
+                    try:
+                        subprocess.Popen(['aplay', '-D', ALSA_DEVICE, '-q', sound_file])
+                    except Exception as e:
+                        pass
+                
+                # Hold the persona animation for 8 seconds
+                def revert_persona():
+                    if self.current_state == persona:
+                        self.set_state(BotStates.SCREENSAVER, "Screensaver...")
+                self.master.after(8000, revert_persona)
+                continue
                 
             # ~2% chance every 30 seconds = roughly once every 25-30 minutes for audio vocalizations
             if random.random() < 0.02:

@@ -520,6 +520,114 @@ def gen_shhh(base_dir="faces/shhh"):
             draw_mouth(d, "mute", open_amount=sz)
         create_face(f"{base_dir}/shhh_{i+1:02d}.png", draw_sh)
 
+def gen_football(base_dir="faces/football"):
+    """BMO's mirror identity. Pink lipstick 'blush' and a bow."""
+    ensure_dir(base_dir)
+    for i in range(8):
+        def draw_fb(d, frame=i):
+            draw_happy_eyes(d)
+            draw_mouth(d, "smile")
+            # Pink lipstick blush on cheeks
+            pink = (255, 105, 180)
+            d.ellipse([150*SCALE, 230*SCALE, 190*SCALE, 260*SCALE], fill=pink)
+            d.ellipse([610*SCALE, 230*SCALE, 650*SCALE, 260*SCALE], fill=pink)
+            # A little pink bow on top
+            d.polygon([(399*SCALE, 70*SCALE), (370*SCALE, 50*SCALE), (370*SCALE, 90*SCALE)], fill=pink)
+            d.polygon([(399*SCALE, 70*SCALE), (428*SCALE, 50*SCALE), (428*SCALE, 90*SCALE)], fill=pink)
+            d.ellipse([385*SCALE, 60*SCALE, 413*SCALE, 80*SCALE], fill=pink)
+        create_face(f"{base_dir}/football_{i+1:02d}.png", draw_fb)
+
+def gen_detective(base_dir="faces/detective"):
+    """Detective BMO with a fedora and pipe."""
+    ensure_dir(base_dir)
+    import math
+    for i in range(8):
+        # Scan eyes
+        offset = int(10 * math.sin(i * math.pi / 4))
+        def draw_det(d, off=offset):
+            # Squinting eyes scanning
+            draw_arc_eye(d, LEFT_EYE_X + off, EYE_Y + 5, EYE_R, 345, 195)
+            draw_arc_eye(d, RIGHT_EYE_X + off, EYE_Y + 5, EYE_R, 345, 195)
+            draw_mouth(d, "straight")
+            # Fedora hat
+            dark_grey = (50, 50, 50)
+            d.rectangle([(250*SCALE, 100*SCALE), (550*SCALE, 120*SCALE)], fill=dark_grey) # brim
+            d.rectangle([(300*SCALE, 20*SCALE), (500*SCALE, 100*SCALE)], fill=dark_grey) # crown
+            d.rectangle([(300*SCALE, 85*SCALE), (500*SCALE, 100*SCALE)], fill=(20, 20, 20)) # band
+            # Magnifying glass / Pipe (let's do pipe)
+            pipe_brown = (139, 69, 19)
+            d.line([(399*SCALE, 302*SCALE), (450*SCALE, 350*SCALE)], fill=pipe_brown, width=8*SCALE)
+            d.rectangle([(440*SCALE, 330*SCALE), (460*SCALE, 350*SCALE)], fill=pipe_brown)
+        create_face(f"{base_dir}/detective_{i+1:02d}.png", draw_det)
+
+def gen_sir_mano(base_dir="faces/sir_mano"):
+    """Sir Mano with a fancy mustache."""
+    ensure_dir(base_dir)
+    for i in range(8):
+        def draw_sm(d):
+            draw_circle_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
+            draw_circle_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, EYE_R - 2)
+            # Gentle smile
+            draw_arc_eye(d, 399, MOUTH_Y - 5, MOUTH_W // 2, 45, 135)
+            # Handlebar mustache (two arcs)
+            w = LINE_WIDTH * SCALE
+            d.arc([(330*SCALE, 260*SCALE), (399*SCALE, 290*SCALE)], 0, 180, fill=LINE_COLOR, width=w)
+            d.arc([(399*SCALE, 260*SCALE), (468*SCALE, 290*SCALE)], 0, 180, fill=LINE_COLOR, width=w)
+            # Curls stringing up
+            d.arc([(310*SCALE, 250*SCALE), (340*SCALE, 280*SCALE)], 90, 270, fill=LINE_COLOR, width=w)
+            d.arc([(458*SCALE, 250*SCALE), (488*SCALE, 280*SCALE)], -90, 90, fill=LINE_COLOR, width=w)
+        create_face(f"{base_dir}/sir_mano_{i+1:02d}.png", draw_sm)
+
+def gen_low_battery(base_dir="faces/low_battery"):
+    """Low battery warning flashing."""
+    ensure_dir(base_dir)
+    for i in range(8):
+        flash = (i % 2 == 0)
+        def draw_lb(d, f=flash):
+            # Drooping, weary eyes
+            draw_line(d, LEFT_EYE_X - EYE_R, EYE_VISUAL_Y + 12, LEFT_EYE_X + EYE_R, EYE_VISUAL_Y - 8)
+            draw_line(d, RIGHT_EYE_X - EYE_R, EYE_VISUAL_Y - 8, RIGHT_EYE_X + EYE_R, EYE_VISUAL_Y + 12)
+            draw_mouth(d, "frown")
+            
+            # Big Battery Icon in the middle top
+            red = (255, 0, 0) if f else (100, 0, 0)
+            d.rectangle([(320*SCALE, 50*SCALE), (450*SCALE, 100*SCALE)], outline=LINE_COLOR, width=6*SCALE)
+            d.rectangle([(450*SCALE, 65*SCALE), (465*SCALE, 85*SCALE)], fill=LINE_COLOR) # nub
+            # One red bar
+            d.rectangle([(325*SCALE, 55*SCALE), (350*SCALE, 95*SCALE)], fill=red)
+        create_face(f"{base_dir}/low_battery_{i+1:02d}.png", draw_lb)
+
+def gen_bee(base_dir="faces/bee"):
+    """BMO watching a bee fly across the screen."""
+    ensure_dir(base_dir)
+    import math
+    for i in range(16):
+        # Bee moves left to right, up and down
+        bee_x = 100 + i * 40
+        bee_y = 150 + int(30 * math.sin(i * math.pi / 2))
+        
+        # Eyes track the bee's X coordinate roughly
+        # Center of screen is 400. Left eye is 217, Right is 581.
+        target_x_offset = int((bee_x - 400) / 15)
+        
+        def draw_bee_frame(d, b_x=bee_x, b_y=bee_y, e_off=target_x_offset):
+            # Wide eyes, shifting to follow
+            draw_circle_eye(d, LEFT_EYE_X + e_off, EYE_VISUAL_Y, EYE_R)
+            draw_circle_eye(d, RIGHT_EYE_X + e_off, EYE_VISUAL_Y, EYE_R)
+            draw_mouth(d, "surprised")
+            
+            # Draw the bee: yellow pill with black stripes
+            yellow = (255, 235, 59)
+            bx, by = b_x*SCALE, b_y*SCALE
+            d.ellipse([bx, by, bx+40*SCALE, by+25*SCALE], fill=yellow)
+            # stripes
+            d.rectangle([bx+10*SCALE, by, bx+16*SCALE, by+25*SCALE], fill=LINE_COLOR)
+            d.rectangle([bx+24*SCALE, by, bx+30*SCALE, by+25*SCALE], fill=LINE_COLOR)
+            # wing
+            d.ellipse([bx+15*SCALE, by-15*SCALE, bx+35*SCALE, by+5*SCALE], fill=(200, 200, 255))
+        create_face(f"{base_dir}/bee_{i+1:02d}.png", draw_bee_frame)
+
+
 if __name__ == "__main__":
     print("Generating BMO Faces...")
     gen_idle()
@@ -544,6 +652,11 @@ if __name__ == "__main__":
     gen_jamming()
     gen_curious()
     gen_shhh()
+    gen_football()
+    gen_detective()
+    gen_sir_mano()
+    gen_low_battery()
+    gen_bee()
     
     # Remove any leftover original (space-named) files that would cause frame jumping
     import glob
