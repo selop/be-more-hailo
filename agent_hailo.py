@@ -430,17 +430,20 @@ class BotGUI:
         frames = []
         silent_chunks = 0
         has_spoken = False
-        ignore_until = time.time() + 1.0          # ignore first second (echo die-down)
+        max_vol_seen = 0.0                        # track for debug
+        ignore_until = time.time() + 1.5          # ignore first 1.5 seconds (speaker echo die-down)
         deadline = time.time() + timeout_sec       # give up if no speech by here
         max_deadline = time.time() + timeout_sec + 8  # hard cap regardless
 
         def callback(indata, frames_count, time_info, status):
-            nonlocal silent_chunks, has_spoken
+            nonlocal silent_chunks, has_spoken, max_vol_seen
             if time.time() < ignore_until:
                 return  # still in echo dead-zone — ignore all audio
             vol = np.linalg.norm(indata) * 10
+            max_vol_seen = max(max_vol_seen, vol)
+            
             frames.append(indata.copy())
-            if vol < 50000:
+            if vol < 2000:  # standard human speaking volume, lower threshold than 50k
                 silent_chunks += 1
             else:
                 silent_chunks = 0
@@ -457,14 +460,17 @@ class BotGUI:
                         break
                     # No speech in the listen window — give up quietly
                     if now > deadline and not has_spoken:
+                        print(f"Follow-up timeout. Max mic volume detected was: {max_vol_seen:.2f} (threshold is 2000)")
                         return None
                     # Hard cap — always exit (catches lingering echo)
                     if now > max_deadline:
+                        print(f"Follow-up max deadline hit. Max volume: {max_vol_seen:.2f}")
                         return None
         except Exception as e:
             print(f"Follow-up listen error: {e}")
             return None
 
+        print(f"Speech finished! Max mic volume was: {max_vol_seen:.2f}")
         if not has_spoken or not frames:
             return None
 
