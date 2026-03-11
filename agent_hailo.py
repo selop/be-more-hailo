@@ -124,8 +124,10 @@ class BotGUI:
             text="🔇 Muted",
             font=('Courier New', 16, 'bold'),
             fg='#f44336',
-            bg='black',
-            padx=10, pady=5
+            bg='#bdffcb',       # BMO's signature green
+            padx=10, pady=5,
+            relief='flat',
+            highlightthickness=0
         )
 
         self.animations = {}
