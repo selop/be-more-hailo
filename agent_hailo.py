@@ -175,7 +175,8 @@ class BotGUI:
         self.sounds = {
             "greeting_sounds": [],
             "ack_sounds": [],
-            "thinking_sounds": []
+            "thinking_sounds": [],
+            "music": []
         }
         base = "sounds"
         for category in self.sounds.keys():
@@ -631,6 +632,24 @@ class BotGUI:
                                     mins = float(action_data.get("minutes"))
                                     msg = action_data.get("message", "Timer is up!")
                                     self.start_timer_thread(mins, msg)
+                                    chunk = chunk.replace(json_match.group(0), '').strip()
+                                elif action_data.get("action") == "play_music":
+                                    # Spawns a background thread to play music and animate
+                                    def music_worker():
+                                        # Wait for current speaking to finish
+                                        while self.current_state in [BotStates.SPEAKING, BotStates.THINKING]:
+                                            time.sleep(0.5)
+                                        
+                                        music_proc = self.play_sound("music")
+                                        if music_proc:
+                                            old_state = self.current_state
+                                            self.set_state(BotStates.JAMMING, "Jamming!")
+                                            music_proc.wait()
+                                            time.sleep(1) # Extra buffer
+                                            if self.current_state == BotStates.JAMMING:
+                                                self.set_state(old_state if old_state != BotStates.JAMMING else BotStates.IDLE, "Ready")
+                                    
+                                    threading.Thread(target=music_worker, daemon=True).start()
                                     chunk = chunk.replace(json_match.group(0), '').strip()
                             except Exception as e:
                                 print(f"JSON Parse Error: {e}")
