@@ -430,8 +430,8 @@ class BotGUI:
         frames = []
         silent_chunks = 0
         has_spoken = False
-        max_vol_seen = 0.0                        # track for debug
-        ignore_until = time.time() + 1.5          # ignore first 1.5 seconds (speaker echo die-down)
+        max_vol_seen = 0.0                        
+        ignore_until = time.time() + 0.2          # ignore first 0.2s for ALSA buffer clear
         deadline = time.time() + timeout_sec       # give up if no speech by here
         max_deadline = time.time() + timeout_sec + 8  # hard cap regardless
 
@@ -443,7 +443,7 @@ class BotGUI:
             max_vol_seen = max(max_vol_seen, vol)
             
             frames.append(indata.copy())
-            if vol < 2000:  # standard human speaking volume, lower threshold than 50k
+            if vol < 50000:  # Matching main record_audio silence threshold
                 silent_chunks += 1
             else:
                 silent_chunks = 0
@@ -453,19 +453,19 @@ class BotGUI:
             with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX,
                                 channels=1, dtype='int16', callback=callback):
                 while not self.stop_event.is_set():
-                    sd.sleep(100)
+                    sd.sleep(50)
                     now = time.time()
                     # Human speech detected and gone quiet — we have a follow-up
                     if has_spoken and silent_chunks > 40:
                         break
                     # No speech in the listen window — give up quietly
                     if now > deadline and not has_spoken:
-                        print(f"Follow-up timeout. Max mic volume detected was: {max_vol_seen:.2f} (threshold is 2000)")
+                        print(f"Follow-up timeout. Max mic volume detected was: {max_vol_seen:.2f} (threshold is 50000)")
                         return None
-                    # Hard cap — always exit (catches lingering echo)
+                    # Hard cap — break out and attempt transcription rather than discarding!
                     if now > max_deadline:
-                        print(f"Follow-up max deadline hit. Max volume: {max_vol_seen:.2f}")
-                        return None
+                        print(f"Follow-up max deadline hit. Breaking to transcribe. Max volume: {max_vol_seen:.2f}")
+                        break
         except Exception as e:
             print(f"Follow-up listen error: {e}")
             return None
