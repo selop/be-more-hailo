@@ -118,6 +118,16 @@ class BotGUI:
         )
         self.status_label.place(relx=0.5, rely=0.92, anchor=tk.S)
 
+        self.is_muted = False
+        self.mute_label = tk.Label(
+            master,
+            text="🔇 Muted",
+            font=('Courier New', 16, 'bold'),
+            fg='#f44336',
+            bg='black',
+            padx=10, pady=5
+        )
+
         self.animations = {}
         self.current_frame = 0
         self.load_animations()
@@ -145,31 +155,40 @@ class BotGUI:
             self.status_label.config(text=msg)
 
     def mute_bmo(self, event=None):
-        """Emergency stop for audio and sets the whimsical 'shhh' face."""
-        try:
-            # Kill any hardware audio playing via aplay immediately
-            subprocess.run(["killall", "-9", "aplay"], capture_output=True)
-            print("[MUTE] Killed aplay process.")
-        except Exception as e:
-            print(f"[MUTE] Error stopping aplay: {e}")
-            
-        old_state = self.current_state
-        self.set_state(BotStates.SHHH, "Shhh...")
-        
-        # Stop background thinking audio loops too if they're active
-        if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
+        """Toggle audio mute and sets the whimsical 'shhh' face."""
+        self.is_muted = not self.is_muted
+        if self.is_muted:
+            self.mute_label.place(relx=0.95, rely=0.05, anchor=tk.NE)
             try:
-                self.thinking_audio_process.terminate()
-            except Exception:
-                pass
-            self.thinking_audio_process = None
+                # Kill any hardware audio playing via aplay immediately
+                subprocess.run(["killall", "-9", "aplay"], capture_output=True)
+                print("[MUTE] Killed aplay process.")
+            except Exception as e:
+                print(f"[MUTE] Error stopping aplay: {e}")
+                
+            old_state = self.current_state
+            self.set_state(BotStates.SHHH, "Muted")
+            
+            # Stop background thinking audio loops too if they're active
+            if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
+                try:
+                    self.thinking_audio_process.terminate()
+                except Exception:
+                    pass
+                self.thinking_audio_process = None
 
-        # After 3 seconds, resume natural state
-        def revert_state():
-            # Only revert if we haven't already transitioned to something else (e.g. LISTENING / SPEAKING)
-            if self.current_state == BotStates.SHHH:
-                self.set_state(old_state if old_state != BotStates.SHHH else BotStates.IDLE, "Ready...")
-        self.master.after(3000, revert_state)
+            # After 3 seconds, resume natural state
+            def revert_state():
+                if self.current_state == BotStates.SHHH:
+                    self.set_state(old_state if old_state != BotStates.SHHH else BotStates.IDLE, "Muted")
+            self.master.after(3000, revert_state)
+        else:
+            self.mute_label.place_forget()
+            self.set_state(BotStates.HAPPY, "Unmuted!")
+            def revert_state():
+                if self.current_state == BotStates.HAPPY:
+                    self.set_state(BotStates.IDLE, "Ready...")
+            self.master.after(2000, revert_state)
 
     # --- ANIMATION & SOUND ENGINE ---
     def load_sounds(self):
@@ -186,6 +205,8 @@ class BotGUI:
                 self.sounds[category] = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith('.wav')]
 
     def play_sound(self, category):
+        if self.is_muted:
+            return None
         sounds = self.sounds.get(category, [])
         if not sounds:
             return None
@@ -428,8 +449,12 @@ class BotGUI:
                 self.last_state_change = time.time()
             
             # 3. Play the generated audio bytes
-            aplay_cmd = ["aplay", "-D", ALSA_DEVICE, "-r", "22050", "-f", "S16_LE", "-t", "raw"]
-            subprocess.run(aplay_cmd, input=res.stdout)
+            if not self.is_muted:
+                aplay_cmd = ["aplay", "-D", ALSA_DEVICE, "-r", "22050", "-f", "S16_LE", "-t", "raw"]
+                subprocess.run(aplay_cmd, input=res.stdout)
+            else:
+                # If muted, just hold the speaking pose for a moment to simulate talking
+                time.sleep(1.5)
             
             # 4. Enforce an immediate IDLE state and a short visual breath pause
             # This ensures the mouth closes definitively before the next sentence chunk arrives,
