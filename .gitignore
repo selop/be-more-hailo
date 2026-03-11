@@ -37,6 +37,7 @@ chat_memory.json
 *.png
 !favicon.png
 !faces/**/*.png
+!sounds/music/*.wav
 camera_capture.jpg
 current_image.jpg
 test_audio.wav
