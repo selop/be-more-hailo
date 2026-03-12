@@ -82,6 +82,15 @@ _DISPLAY_IMAGE_KEYWORDS = [
     "draw me", "draw a",
 ]
 
+_MUSIC_KEYWORDS = [
+    "play music", "play a song", "play me a song", "play some music",
+    "sing a song", "sing me a song", "sing for me", "sing something",
+    "play a tune", "play me a tune", "play some tunes",
+    "can you sing", "will you sing", "do you sing",
+    "play your music", "jam out", "dance for me",
+    "sing for bmo", "bmo sing", "play me some music",
+]
+
 # Phrases that indicate the model is regurgitating system prompt instructions
 _PROMPT_LEAK_PATTERNS = [
     re.compile(r'CRIT(?:IC)?AL:.*?JSON', re.IGNORECASE | re.DOTALL),
@@ -157,6 +166,13 @@ class Brain:
         # directly instead of relying on the small model to emit correct JSON
         if any(kw in lower_text for kw in _DISPLAY_IMAGE_KEYWORDS):
             action = _build_display_image_action(user_text)
+            self.history.append({"role": "assistant", "content": action})
+            return action
+
+        # Pre-LLM music check — emit play_music directly rather than
+        # relying on the small model to emit correct JSON
+        if any(kw in lower_text for kw in _MUSIC_KEYWORDS):
+            action = '{"action": "play_music"}'
             self.history.append({"role": "assistant", "content": action})
             return action
 
@@ -328,6 +344,13 @@ class Brain:
         # Pre-LLM display_image check
         if any(kw in lower_text for kw in _DISPLAY_IMAGE_KEYWORDS):
             action = _build_display_image_action(user_text)
+            self.history.append({"role": "assistant", "content": action})
+            yield action
+            return
+
+        # Pre-LLM music check — emit play_music directly
+        if any(kw in lower_text for kw in _MUSIC_KEYWORDS):
+            action = '{"action": "play_music"}'
             self.history.append({"role": "assistant", "content": action})
             yield action
             return

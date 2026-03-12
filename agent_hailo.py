@@ -675,14 +675,30 @@ class BotGUI:
                                         while self.current_state in [BotStates.SPEAKING, BotStates.THINKING]:
                                             time.sleep(0.5)
                                         
+                                        # Say something fun before playing
+                                        intros = [
+                                            "Oh yeah! BMO is going to jam out!",
+                                            "Time for music! La la la!",
+                                            "BMO loves this song!",
+                                            "Let BMO play you a tune!",
+                                            "Music time! BMO is so excited!",
+                                        ]
+                                        self.speak(random.choice(intros), msg="Getting ready to jam...")
+                                        
+                                        print("[MUSIC] Starting music playback...")
                                         music_proc = self.play_sound("music")
                                         if music_proc:
                                             old_state = self.current_state
                                             self.set_state(BotStates.JAMMING, "Jamming!")
+                                            print("[MUSIC] Now playing! State set to JAMMING")
                                             music_proc.wait()
+                                            print("[MUSIC] Playback finished")
                                             time.sleep(1) # Extra buffer
                                             if self.current_state == BotStates.JAMMING:
-                                                self.set_state(old_state if old_state != BotStates.JAMMING else BotStates.IDLE, "Ready")
+                                                self.set_state(BotStates.IDLE, "Ready")
+                                        else:
+                                            print("[MUSIC] No music files found or muted!")
+                                            self.speak("BMO wants to play music, but there are no songs loaded!")
                                     
                                     threading.Thread(target=music_worker, daemon=True).start()
                                     chunk = chunk.replace(json_match.group(0), '').strip()

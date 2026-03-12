@@ -791,7 +791,8 @@
         let soundFiles = {
             greeting_sounds: [],
             ack_sounds: [],
-            thinking_sounds: []
+            thinking_sounds: [],
+            music: []
         };
 
         // Audio Recording Variables
@@ -868,6 +869,7 @@
             await loadSounds('greeting_sounds');
             await loadSounds('ack_sounds');
             await loadSounds('thinking_sounds');
+            await loadSounds('music');
 
             // Try to play greeting sound (might be blocked by browser autoplay policy)
             const greetingAudio = playRandomSound('greeting_sounds');
@@ -1270,6 +1272,22 @@
             return audio;
         }
 
+        function playMusicFromServer() {
+            console.log('[MUSIC] Playing music from server...');
+            const musicAudio = playRandomSound('music');
+            if (musicAudio) {
+                setFaceState('jamming');
+                updateTranscript('🎵 BMO is jamming! 🎵', 5000);
+                musicAudio.onended = () => {
+                    console.log('[MUSIC] Playback finished');
+                    setFaceState('idle');
+                };
+            } else {
+                console.warn('[MUSIC] No music files available');
+                addMessage('BMO wants to play music, but there are no songs loaded!', 'bmo');
+            }
+        }
+
         // Set the current face animation state
         function setFaceState(state) {
             if (animationInterval) {
@@ -1501,6 +1519,10 @@
                                     setTimeout(() => setFaceState('idle'), 5000);
                                 }
                                 responseText = responseText.replace(jsonMatch[0], '').trim();
+                            } else if (actionData.action === 'play_music') {
+                                responseText = responseText.replace(jsonMatch[0], '').trim();
+                                // Will trigger music playback after message display
+                                setTimeout(() => playMusicFromServer(), 500);
                             }
                         } catch (e) {
                             console.error("Failed to parse JSON action:", e);
@@ -1632,6 +1654,11 @@
                 } else if (data.response.includes('{"action": "take_photo"}')) {
                     // LLM requested a photo
                     takePhotoAndSend(text);
+                } else if (data.response.includes('{"action": "play_music"}')) {
+                    // LLM requested music playback
+                    addMessage('Oh yeah! BMO is going to jam out! 🎵', 'bmo');
+                    conversationHistory = data.history;
+                    playMusicFromServer();
                 } else {
                     let responseText = data.response;
                     let imageUrl = null;
@@ -1650,6 +1677,9 @@
                                     setTimeout(() => setFaceState('idle'), 5000);
                                 }
                                 responseText = responseText.replace(jsonMatch[0], '').trim();
+                            } else if (actionData.action === 'play_music') {
+                                responseText = responseText.replace(jsonMatch[0], '').trim();
+                                setTimeout(() => playMusicFromServer(), 500);
                             }
                         } catch (e) {
                             console.error("Failed to parse JSON action:", e);
