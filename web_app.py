@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import logging
 import os
+import json
 import uuid
 import requests
 import shutil
@@ -160,24 +161,36 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     if content.startswith("Error:") or content.startswith("Could not connect") or content.startswith("I'm having trouble"):
         return {"error": content, "history": brain.get_history()}
 
-    # Clean text for TTS (applies pronunciation replacements like BMO->beemo).
-    # Keep the original content for display so the user sees "BMO" not "beemo".
-    tts_content = clean_text_for_speech(content)
-    if not tts_content:
-        tts_content = content  # fallback to raw if cleaning strips everything
+    # Check if the response is a pure action JSON (play_music, display_image, take_photo)
+    # These are handled client-side — skip TTS generation for them
+    is_action = False
+    try:
+        action_data = json.loads(content)
+        if isinstance(action_data, dict) and "action" in action_data:
+            is_action = True
+            logger.info(f"Action response detected: {action_data.get('action')} — skipping TTS")
+    except (json.JSONDecodeError, ValueError):
+        pass
 
     audio_url = None
 
-    # Periodically clean up old audio files
-    background_tasks.add_task(_cleanup_old_audio)
+    if not is_action:
+        # Clean text for TTS (applies pronunciation replacements like BMO->beemo).
+        # Keep the original content for display so the user sees "BMO" not "beemo".
+        tts_content = clean_text_for_speech(content)
+        if not tts_content:
+            tts_content = content  # fallback to raw if cleaning strips everything
 
-    if play_on_hardware:
-        # Play on Pi speakers in the background so we don't block the UI response
-        background_tasks.add_task(play_audio_on_hardware, tts_content)
-    else:
-        # Generate a WAV file for the browser to play
-        filename = f"response_{uuid.uuid4().hex[:8]}.wav"
-        audio_url = generate_audio_file(tts_content, filename)
+        # Periodically clean up old audio files
+        background_tasks.add_task(_cleanup_old_audio)
+
+        if play_on_hardware:
+            # Play on Pi speakers in the background so we don't block the UI response
+            background_tasks.add_task(play_audio_on_hardware, tts_content)
+        else:
+            # Generate a WAV file for the browser to play
+            filename = f"response_{uuid.uuid4().hex[:8]}.wav"
+            audio_url = generate_audio_file(tts_content, filename)
 
     return {
         "response": content,

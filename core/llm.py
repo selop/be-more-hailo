@@ -166,6 +166,9 @@ class Brain:
         # directly instead of relying on the small model to emit correct JSON
         if any(kw in lower_text for kw in _DISPLAY_IMAGE_KEYWORDS):
             action = _build_display_image_action(user_text)
+            matched_kw = next(kw for kw in _DISPLAY_IMAGE_KEYWORDS if kw in lower_text)
+            print(f"[LLM] Image keyword MATCHED: '{matched_kw}' in '{lower_text[:60]}'")
+            print(f"[LLM] Emitting display_image action: {action[:80]}")
             self.history.append({"role": "assistant", "content": action})
             return action
 
@@ -173,8 +176,13 @@ class Brain:
         # relying on the small model to emit correct JSON
         if any(kw in lower_text for kw in _MUSIC_KEYWORDS):
             action = '{"action": "play_music"}'
+            matched_kw = next(kw for kw in _MUSIC_KEYWORDS if kw in lower_text)
+            print(f"[LLM] Music keyword MATCHED: '{matched_kw}' in '{lower_text[:60]}'")
+            print(f"[LLM] Emitting play_music action")
             self.history.append({"role": "assistant", "content": action})
             return action
+
+        print(f"[LLM] No pre-LLM action matched for: '{lower_text[:60]}'")
 
         # Pre-LLM web search — same logic as stream_think
         realtime_keywords = [
@@ -344,6 +352,8 @@ class Brain:
         # Pre-LLM display_image check
         if any(kw in lower_text for kw in _DISPLAY_IMAGE_KEYWORDS):
             action = _build_display_image_action(user_text)
+            matched_kw = next(kw for kw in _DISPLAY_IMAGE_KEYWORDS if kw in lower_text)
+            print(f"[LLM-STREAM] Image keyword MATCHED: '{matched_kw}' in '{lower_text[:60]}'")
             self.history.append({"role": "assistant", "content": action})
             yield action
             return
@@ -351,9 +361,13 @@ class Brain:
         # Pre-LLM music check — emit play_music directly
         if any(kw in lower_text for kw in _MUSIC_KEYWORDS):
             action = '{"action": "play_music"}'
+            matched_kw = next(kw for kw in _MUSIC_KEYWORDS if kw in lower_text)
+            print(f"[LLM-STREAM] Music keyword MATCHED: '{matched_kw}' in '{lower_text[:60]}'")
             self.history.append({"role": "assistant", "content": action})
             yield action
             return
+
+        print(f"[LLM-STREAM] No pre-LLM action matched for: '{lower_text[:60]}'")
 
         # Pre-LLM keyword check: if the question likely needs real-time info,
         # do the web search now rather than relying on the model to emit JSON.

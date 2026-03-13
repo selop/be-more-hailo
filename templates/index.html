@@ -1659,6 +1659,23 @@
                     addMessage('Oh yeah! BMO is going to jam out! 🎵', 'bmo');
                     conversationHistory = data.history;
                     playMusicFromServer();
+                } else if (data.response.includes('"action": "display_image"')) {
+                    // LLM requested image display — early intercept
+                    try {
+                        const imgAction = JSON.parse(data.response);
+                        if (imgAction.image_url) {
+                            console.log('[IMAGE] Early intercept — displaying:', imgAction.image_url);
+                            addMessage('Ooh, let BMO draw something for you! 🎨', 'bmo');
+                            const displayImg = document.getElementById('bmo-display-image');
+                            displayImg.src = imgAction.image_url;
+                            displayImg.style.display = 'block';
+                            conversationHistory = data.history;
+                            setFaceState('happy');
+                            setTimeout(() => setFaceState('idle'), 8000);
+                        }
+                    } catch (e) {
+                        console.error('[IMAGE] Early intercept parse error:', e);
+                    }
                 } else {
                     let responseText = data.response;
                     let imageUrl = null;

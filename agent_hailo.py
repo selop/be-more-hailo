@@ -643,18 +643,23 @@ class BotGUI:
                             continue
                             
                         full_response += chunk
+                        print(f"[AGENT] Chunk received: '{chunk[:80]}'")
                         
                         # Handle json actions
                         if '{"action": "take_photo"}' in chunk:
+                            print("[AGENT] take_photo action detected!")
                             taking_photo = True
                             break
                             
                         json_match = re.search(r'\{.*?\}', chunk, re.DOTALL)
                         if json_match:
+                            print(f"[AGENT] JSON regex matched: '{json_match.group(0)[:80]}'")
                             try:
                                 action_data = json.loads(json_match.group(0))
+                                print(f"[AGENT] Parsed action: {action_data.get('action', 'unknown')}")
                                 if action_data.get("action") == "display_image" and action_data.get("image_url"):
                                     image_url = action_data.get("image_url")
+                                    print(f"[AGENT] display_image URL set: {image_url[:80]}")
                                     chunk = chunk.replace(json_match.group(0), '').strip()
                                 elif action_data.get("action") == "set_expression" and action_data.get("value"):
                                     expr = action_data.get("value").lower()
@@ -703,7 +708,7 @@ class BotGUI:
                                     threading.Thread(target=music_worker, daemon=True).start()
                                     chunk = chunk.replace(json_match.group(0), '').strip()
                             except Exception as e:
-                                print(f"JSON Parse Error: {e}")
+                                print(f"[AGENT] JSON Parse Error: {e} for: '{json_match.group(0)[:50]}'")
                                 
                         if chunk.strip():
                             self.speak(chunk)
@@ -744,7 +749,10 @@ class BotGUI:
                     
                     # 5. Display Image (if any)
                     if image_url:
+                        # Speak confirmation before downloading
+                        self.speak("Ooh, let BMO draw something for you!")
                         self.set_state(BotStates.DISPLAY_IMAGE, "Showing Image...")
+                        print(f"[IMAGE] Starting image display for: {image_url}")
                         try:
                             # Migrate old pollinations URL if the LLM emitted the old format
                             image_url = image_url.replace("image.pollinations.ai/prompt/", "gen.pollinations.ai/image/")
