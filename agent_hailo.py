@@ -107,7 +107,7 @@ class BotGUI:
         # Audio State
         self.current_audio_process = None
         self.tts_queue = []
-        
+
         # Memory
         self.brain = Brain()
 
@@ -223,6 +223,7 @@ class BotGUI:
             "greeting_sounds": [],
             "ack_sounds": [],
             "thinking_sounds": [],
+            "camera_sounds": [],
             "music": []
         }
         base = "sounds"
@@ -247,7 +248,7 @@ class BotGUI:
     def load_animations(self):
         base = "faces"
         all_face_paths = []
-        for state in [BotStates.IDLE, BotStates.LISTENING, BotStates.THINKING, BotStates.SPEAKING, BotStates.ERROR, BotStates.HAPPY, BotStates.SAD, BotStates.ANGRY, BotStates.SURPRISED, BotStates.SLEEPY, BotStates.DIZZY, BotStates.CHEEKY, BotStates.HEART, BotStates.STARRY_EYED, BotStates.CONFUSED, BotStates.SHHH, BotStates.JAMMING, BotStates.FOOTBALL, BotStates.DETECTIVE, BotStates.SIR_MANO, BotStates.LOW_BATTERY, BotStates.BEE]:
+        for state in [BotStates.IDLE, BotStates.LISTENING, BotStates.THINKING, BotStates.SPEAKING, BotStates.ERROR, BotStates.HAPPY, BotStates.SAD, BotStates.ANGRY, BotStates.SURPRISED, BotStates.SLEEPY, BotStates.DIZZY, BotStates.CHEEKY, BotStates.HEART, BotStates.STARRY_EYED, BotStates.CONFUSED, BotStates.SHHH, BotStates.JAMMING, BotStates.FOOTBALL, BotStates.DETECTIVE, BotStates.SIR_MANO, BotStates.LOW_BATTERY, BotStates.BEE, BotStates.CAPTURING]:
             path = os.path.join(base, state)
             self.animations[state] = []
             if os.path.exists(path):
@@ -333,6 +334,8 @@ class BotGUI:
             speed = 500
         elif self.current_state == BotStates.LISTENING:
             speed = 250
+        elif self.current_state == BotStates.CAPTURING:
+            speed = 150  # 8 frames × 150ms = 1.2s per shutter cycle
         elif self.current_state == BotStates.SCREENSAVER or self.current_state == BotStates.SHHH:
             speed = 400 # Smooth animation speed for sequences
 
@@ -355,13 +358,13 @@ class BotGUI:
                 while not self.stop_event.is_set():
                     data, _ = stream.read(CHUNK * downsample_factor)
                     # Simple integer decimation for 48k -> 16k
-                    audio_16k = data[::downsample_factor].flatten() 
-                    
-                    # Feed to model. 
+                    audio_16k = data[::downsample_factor].flatten()
+
+                    # Feed to model.
                     # Assuming model name is 'wakeword' if you only loaded that one onnx file
                     # but openwakeword usually keys predictions by model name.
                     oww.predict(audio_16k)
-                    
+
                     # Dynamically find the score so we don't crash on key error
                     for key in oww.prediction_buffer.keys():
                         if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
@@ -394,7 +397,7 @@ class BotGUI:
             else:
                 silent_chunks = 0
                 has_spoken = True
-
+            
         try:
             record_start = time.time()
             with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16', callback=callback):
@@ -409,11 +412,11 @@ class BotGUI:
                     if has_spoken and silent_chunks > 40:
                         break
                     if len(frames) > (MIC_SAMPLE_RATE * 10 / 512): # Max 10 seconds approx
-                        break 
+                        break
         except Exception as e:
             bmo_print("STT", f"Recording Error: {e}")
             return None
-        
+
         # Save file
         if not frames:
             return None
@@ -745,7 +748,22 @@ class BotGUI:
                             self.speak(chunk)
 
                     if taking_photo:
-                        self.set_state(BotStates.CAPTURING, "Taking Photo...")
+                        # Clear transcription bubble so it doesn't clip the camera face
+                        self.bubble.hide()
+                        # --- Camera UX: animated face + spoken intro + shutter ---
+                        camera_intros = [
+                            "BMO is activating camera mode!",
+                            "Loading photo module, please wait a sec!",
+                            "Say cheese! BMO is going to take a picture!",
+                            "Photo time! Hold still for BMO!",
+                            "BMO's camera is warming up!",
+                            "Ooh, let BMO see what's out there!",
+                            "Smile! BMO is about to snap a photo!",
+                        ]
+                        self.speak(random.choice(camera_intros))
+                        self.set_state(BotStates.CAPTURING, "Say cheese!")
+                        time.sleep(2)
+                        self.play_sound("camera_sounds")
                         try:
                             # Try libcamera-still (older) or rpicam-still (newer Pi OS)
                             cam_cmd = None
