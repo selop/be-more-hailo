@@ -422,7 +422,58 @@ def gen_error(base_dir="faces/error"):
 
 def gen_capturing(base_dir="faces/capturing"):
     ensure_dir(base_dir)
-    create_face(f"{base_dir}/capturing_01.png", lambda d: (draw_surprised_eyes(d), draw_mouth(d, "surprised")))
+    # 8-frame camera illustration with shutter animation
+    # Aperture radius cycles to simulate shutter snap; frame 5 fires flash
+    apertures = [60, 60, 40, 20, 3, 20, 40, 60]
+    for i, ap_r in enumerate(apertures):
+        flash_on = (i == 4)  # frame 5 (0-indexed 4) = flash fires
+        def draw_camera(d, aperture=ap_r, flash=flash_on):
+            s = SCALE
+            # Camera body — dark grey rounded rectangle
+            body_color = (60, 60, 60)
+            body = [120*s, 80*s, 680*s, 400*s]
+            d.rounded_rectangle(body, radius=30*s, fill=body_color, outline=LINE_COLOR, width=LINE_WIDTH*s)
+
+            # Viewfinder — small dark rectangle top-left
+            vf_color = (30, 30, 30)
+            d.rectangle([160*s, 100*s, 220*s, 140*s], fill=vf_color, outline=LINE_COLOR, width=4*s)
+
+            # Shutter button — circle on top center
+            btn_color = (90, 90, 90)
+            btn_cx, btn_cy, btn_r = 399*s, 70*s, 18*s
+            d.ellipse([btn_cx-btn_r, btn_cy-btn_r, btn_cx+btn_r, btn_cy+btn_r],
+                      fill=btn_color, outline=LINE_COLOR, width=4*s)
+
+            # Flash — small rectangle top-right, bright white when firing
+            flash_color = (255, 255, 255) if flash else (255, 230, 100)
+            flash_outline = (255, 255, 255) if flash else LINE_COLOR
+            d.rectangle([580*s, 100*s, 640*s, 140*s], fill=flash_color, outline=flash_outline, width=4*s)
+            # Flash glow effect when firing
+            if flash:
+                d.rectangle([570*s, 90*s, 650*s, 150*s], fill=None, outline=(255, 255, 200), width=3*s)
+
+            # Lens — concentric circles centered on body
+            lens_cx, lens_cy = 399*s, 250*s
+            lens_outer_r = 100*s
+            # Outer lens ring
+            d.ellipse([lens_cx-lens_outer_r, lens_cy-lens_outer_r, lens_cx+lens_outer_r, lens_cy+lens_outer_r],
+                      fill=(20, 20, 20), outline=(100, 100, 100), width=8*s)
+            # Inner glass
+            glass_r = 80*s
+            d.ellipse([lens_cx-glass_r, lens_cy-glass_r, lens_cx+glass_r, lens_cy+glass_r],
+                      fill=(10, 10, 40), outline=(60, 60, 60), width=4*s)
+            # Aperture circle (animated size)
+            ap = aperture * s
+            if ap > 0:
+                ap_color = (40, 40, 80)
+                d.ellipse([lens_cx-ap, lens_cy-ap, lens_cx+ap, lens_cy+ap],
+                          fill=ap_color, outline=(80, 80, 120), width=3*s)
+            # Lens highlight (small white crescent)
+            hl_cx, hl_cy = lens_cx - 30*s, lens_cy - 30*s
+            hl_r = 15*s
+            d.ellipse([hl_cx-hl_r, hl_cy-hl_r, hl_cx+hl_r, hl_cy+hl_r], fill=(255, 255, 255, 180))
+
+        create_face(f"{base_dir}/capturing_{i+1:02d}.png", draw_camera)
 
 def gen_warmup(base_dir="faces/warmup"):
     ensure_dir(base_dir)
