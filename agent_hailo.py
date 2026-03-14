@@ -36,7 +36,7 @@ from openwakeword.model import Model
 from core.llm import Brain
 from core.tts import play_audio_on_hardware
 from core.stt import transcribe_audio
-from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE
+from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, t
 from core.meter import MicMeter
 from core.bubble import ThoughtBubble
 from core.log import bmo_print, setup_logging
@@ -227,8 +227,12 @@ class BotGUI:
             "music": []
         }
         base = "sounds"
+        lang_suffix = f"_{LANGUAGE}" if LANGUAGE != "en" else ""
         for category in self.sounds.keys():
-            path = os.path.join(base, category)
+            # Try language-specific directory first (e.g. greeting_sounds_de), fall back to default
+            path = os.path.join(base, category + lang_suffix)
+            if not os.path.exists(path):
+                path = os.path.join(base, category)
             if os.path.exists(path):
                 self.sounds[category] = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith('.wav')]
 
@@ -461,7 +465,7 @@ class BotGUI:
 
     def speak(self, text, msg="Speaking..."):
         from core.tts import clean_text_for_speech
-        from core.config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE
+        from core.config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE
         
         clean_text = clean_text_for_speech(text)
         if not clean_text or not any(c.isalnum() for c in clean_text):
@@ -472,7 +476,7 @@ class BotGUI:
             safe_text = clean_text.replace("'", "'\\''")
             
             # 1. Synthesize audio first. (Runs silently, mouth stays idle/thinking)
-            piper_cmd = f"echo '{safe_text}' | {PIPER_CMD} --model {PIPER_MODEL} --output_raw"
+            piper_cmd = f"echo '{safe_text}' | {PIPER_CMD} --model {PIPER_MODEL} --length-scale {PIPER_LENGTH_SCALE} --output_raw"
             res = subprocess.run(piper_cmd, shell=True, capture_output=True)
             if res.returncode != 0:
                 bmo_print("TTS", f"Piper error: {res.stderr}")
@@ -715,14 +719,7 @@ class BotGUI:
                                             time.sleep(0.5)
                                         
                                         # Say something fun before playing
-                                        intros = [
-                                            "Oh yeah! BMO is going to jam out!",
-                                            "Time for music! La la la!",
-                                            "BMO loves this song!",
-                                            "Let BMO play you a tune!",
-                                            "Music time! BMO is so excited!",
-                                        ]
-                                        self.speak(random.choice(intros), msg="Getting ready to jam...")
+                                        self.speak(random.choice(t("music_intros")), msg="Getting ready to jam...")
                                         
                                         bmo_print("MUSIC", "Starting music playback...")
                                         music_proc = self.play_sound("music")
@@ -737,7 +734,7 @@ class BotGUI:
                                                 self.set_state(BotStates.IDLE, "Ready")
                                         else:
                                             bmo_print("MUSIC", "No music files found or muted!")
-                                            self.speak("BMO wants to play music, but there are no songs loaded!")
+                                            self.speak(t("no_music"))
                                     
                                     threading.Thread(target=music_worker, daemon=True).start()
                                     chunk = chunk.replace(json_match.group(0), '').strip()
@@ -751,16 +748,7 @@ class BotGUI:
                         # Clear transcription bubble so it doesn't clip the camera face
                         self.bubble.hide()
                         # --- Camera UX: animated face + spoken intro + shutter ---
-                        camera_intros = [
-                            "BMO is activating camera mode!",
-                            "Loading photo module, please wait a sec!",
-                            "Say cheese! BMO is going to take a picture!",
-                            "Photo time! Hold still for BMO!",
-                            "BMO's camera is warming up!",
-                            "Ooh, let BMO see what's out there!",
-                            "Smile! BMO is about to snap a photo!",
-                        ]
-                        self.speak(random.choice(camera_intros))
+                        self.speak(random.choice(t("camera_intros")))
                         self.set_state(BotStates.CAPTURING, "Say cheese!")
                         time.sleep(2)
                         self.play_sound("camera_sounds")
@@ -790,16 +778,16 @@ class BotGUI:
                             self.speak(response)
                         except FileNotFoundError as e:
                             bmo_print("CAMERA", f"Error: {e}")
-                            self.speak("Hmm, BMO doesn't seem to have a camera connected right now. I can't take a photo!")
+                            self.speak(t("no_camera"))
 
                         except Exception as e:
                             bmo_print("CAMERA", f"Error: {e}")
-                            self.speak("I tried to take a photo, but my camera isn't working.")
+                            self.speak(t("camera_error"))
                     
                     # 5. Display Image (if any)
                     if image_url:
                         # Speak confirmation before downloading
-                        self.speak("Ooh, let BMO draw something for you!")
+                        self.speak(t("draw_image"))
                         self.set_state(BotStates.DISPLAY_IMAGE, "Showing Image...")
                         bmo_print("IMAGE", f"Starting image display for: {image_url}")
                         try:
@@ -868,6 +856,10 @@ class BotGUI:
                 # pick up BMO's own intro speech and the music itself as false input.
                 if music_triggered:
                     bmo_print("FOLLOW-UP", "Skipped — music playback active")
+                    continue
+
+                if not FOLLOWUP_ENABLED:
+                    bmo_print("FOLLOW-UP", "Disabled via config")
                     continue
 
                 # Conversation follow-up: let user reply repeatedly as long as they respond within 8 seconds

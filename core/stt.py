@@ -2,7 +2,7 @@ import subprocess
 import logging
 import os
 import re
-from .config import WHISPER_CMD, WHISPER_MODEL
+from .config import WHISPER_CMD, WHISPER_MODEL, LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,8 @@ def transcribe_audio(audio_filepath: str) -> str:
 
         # 2. Run whisper.cpp
         cmd = [WHISPER_CMD, "-m", WHISPER_MODEL, "-f", temp_wav, "-nt"]
+        if LANGUAGE != "en":
+            cmd += ["-l", LANGUAGE]
         logger.info(f"Running whisper.cpp transcription on the CPU... CMD: {' '.join(cmd)}")
         try:
             # stderr=DEVNULL: whisper prints verbose debug/timing info to stderr.

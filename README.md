@@ -325,9 +325,22 @@ ls /dev/hailo0  # should now exist
 ```
 The setup script handles this automatically, but if you installed manually you may need to do it yourself.
 
-**Inference fails with `HAILO_OUT_OF_PHYSICAL_DEVICES`**
+**Inference fails with `HAILO_OUT_OF_PHYSICAL_DEVICES` (status 74)**
 
-This means `/dev/hailo0` doesn't exist — see the fix above. Another cause is a process already holding the device; check with `lsof /dev/hailo0`.
+This means `/dev/hailo0` doesn't exist. Common causes:
+
+1. **Driver conflict** — see the blacklist fix above.
+2. **Kernel updated, driver not rebuilt** — after a kernel update the Hailo DKMS module may be missing for the new kernel. Verify with:
+   ```bash
+   uname -r                          # e.g. 6.12.62+rpt-rpi-2712
+   ls /lib/modules/$(uname -r)/extra/hailo*  # should list .ko files
+   ```
+   If the module is missing, reinstall the driver package to rebuild it:
+   ```bash
+   sudo apt reinstall h10-hailort-pcie-driver
+   sudo reboot
+   ```
+3. **Another process holding the device** — check with `lsof /dev/hailo0`.
 
 **VLM fails with `HAILO_INVALID_OPERATION` / `HailoRTStatusException: 6`**
 
