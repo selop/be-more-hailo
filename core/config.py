@@ -10,13 +10,8 @@ load_dotenv()
 # Supported: "en" (English, default), "de" (German)
 LANGUAGE = os.environ.get("BMO_LANGUAGE", "en")
 
-# LLM Settings
-# To offload to your Linux server, change this to: "http://blackbox.clevercode.ts.net:11434/api/chat"
-# Make sure Ollama is running on the blackbox server and listening on 0.0.0.0
-LLM_URL = "http://127.0.0.1:8000/api/chat"
-LLM_MODEL = "qwen2.5-instruct:1.5b" # Native Hailo model for all queries
-FAST_LLM_MODEL = "qwen2.5-instruct:1.5b" # Unify models to prevent NPU swap crashing
-VISION_MODEL = "qwen2-vl-instruct:2b" # Legacy Ollama name (unused — VLM runs via HailoRT directly)
+# LLM HEF — direct NPU inference via hailo_platform.genai.LLM (no hailo-ollama needed)
+LLM_HEF_PATH = os.environ.get("LLM_HEF_PATH", "./models/Qwen2.5-1.5B-Instruct.hef")
 
 # VLM (Vision Language Model) Settings — uses HailoRT Python API directly
 # The HEF file is a precompiled model binary from Hailo's model zoo
@@ -114,7 +109,7 @@ SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
 
 # UI Settings
 MIC_METER_ENABLED = True  # Show mic gain meter overlay during listening
-FOLLOWUP_ENABLED = True   # Keep listening after BMO responds for multi-turn conversation
+FOLLOWUP_ENABLED = False  # Keep listening after BMO responds for multi-turn conversation
 
 # Localized strings for hardcoded speech lines
 STRINGS = {

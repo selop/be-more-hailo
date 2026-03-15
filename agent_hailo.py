@@ -33,7 +33,7 @@ import scipy.signal
 from openwakeword.model import Model
 
 # Import unified core modules
-from core.llm import Brain
+from core.llm import Brain, init_llm, is_llm_ready, _get_llm
 from core.tts import play_audio_on_hardware, init_audio, shutdown_audio, get_player, get_synthesizer, clean_text_for_speech
 from core.stt import transcribe_audio
 from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, SILENCE_THRESHOLD, t
@@ -603,6 +603,10 @@ class BotGUI:
         init_audio(ALSA_DEVICE)
         atexit.register(shutdown_audio)
 
+        # Initialize LLM on the Hailo NPU (direct Python API, no hailo-ollama)
+        self.set_state(BotStates.WARMUP, "Loading Brain...")
+        init_llm()
+
         # Load Wake Word
         self.set_state(BotStates.WARMUP, "Loading Ear...")
         try:
@@ -917,9 +921,7 @@ class BotGUI:
 
     def screensaver_audio_loop(self):
         import datetime
-        import requests as http_requests
         from core.search import search_web
-        from core.config import LLM_URL, FAST_LLM_MODEL
         
         # Topics BMO might wonder about — used as web search seeds
         search_topics = [
@@ -948,17 +950,8 @@ class BotGUI:
             "Football... is a tough little guy.",
         ]
         
-        def is_llm_reachable():
-            """Quick health check — ping the Ollama base URL before making a full LLM call."""
-            try:
-                base_url = LLM_URL.replace("/api/chat", "")
-                r = http_requests.get(base_url, timeout=5)
-                return r.status_code == 200
-            except Exception:
-                return False
-        
         def generate_thought(search_result):
-            """Generate a BMO musing using a direct (non-streaming) LLM call.
+            """Generate a BMO musing using the direct NPU LLM API.
             Returns the thought string, or None on failure."""
             thought_prompt = (
                 "You are BMO, a cute little robot. You just learned something interesting from the real world. "
@@ -980,28 +973,21 @@ class BotGUI:
                 "Do NOT use JSON unless you are creating an image.\n\n"
                 f"Info: {search_result[:1200]}"
             )
-            payload = {
-                "model": FAST_LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts."},
-                    {"role": "user", "content": thought_prompt},
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": 0.8,
-                    "num_predict": 300,
-                }
-            }
+            messages = [
+                {"role": "system", "content": "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts."},
+                {"role": "user", "content": thought_prompt},
+            ]
             try:
-                resp = http_requests.post(LLM_URL, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    content = resp.json().get("message", {}).get("content", "").strip()
-                    # Filter out error-like responses the model might echo
-                    if content and "connect" not in content.lower() and "error" not in content.lower():
-                        return content
-                else:
-                    bmo_print("SCREENSAVER", f"LLM returned status {resp.status_code}")
-            except http_requests.exceptions.RequestException as e:
+                llm = _get_llm()
+                content = llm.generate_all(prompt=messages, temperature=0.8, max_generated_tokens=300)
+                # Strip stop tokens
+                for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+                    content = content.replace(tok, "")
+                content = content.strip()
+                # Filter out error-like responses the model might echo
+                if content and "connect" not in content.lower() and "error" not in content.lower():
+                    return content
+            except Exception as e:
                 bmo_print("SCREENSAVER", f"LLM request failed: {e}")
             return None
         
@@ -1063,7 +1049,7 @@ class BotGUI:
                     phrase = None
                     
                     # Check if LLM server is even reachable before trying
-                    if is_llm_reachable():
+                    if is_llm_ready():
                         try:
                             topic = random.choice(search_topics)
                             bmo_print("SCREENSAVER", f"Searching for: {topic}")

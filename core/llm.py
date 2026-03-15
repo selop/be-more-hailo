@@ -1,15 +1,12 @@
 import base64
 import os
-import subprocess
-import signal
 import time
-import requests
 import logging
 import re
 import json
 import urllib.parse
 import numpy as np
-from .config import LLM_URL, LLM_MODEL, FAST_LLM_MODEL, VISION_MODEL, VLM_HEF_PATH, get_system_prompt
+from .config import LLM_HEF_PATH, VLM_HEF_PATH, get_system_prompt
 from .tts import add_pronunciation
 from .search import search_web
 from .log import bmo_print
@@ -17,157 +14,200 @@ from .log import bmo_print
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
-#  Hailo VLM (Vision Language Model) singleton
+#  VDevice + LLM singleton (main process only — VLM runs in a child process
+#  with its own VDevice since the NPU can't hold both models simultaneously)
 # --------------------------------------------------------------------------- #
-# Lazy-loaded on first image analysis request.  Kept alive so subsequent
-# requests don't pay the ~3 s init cost again.
-_vlm_instance = None
-_vlm_vdevice = None
+_vdevice = None
+_llm_instance = None
+_system_context = None  # Cached KV state for the system prompt
 
 
-def _get_vlm():
-    """Return a (vlm, frame_shape, frame_dtype) tuple, initialising on first call."""
-    global _vlm_instance, _vlm_vdevice
+def _resolve_hef(hef_path: str) -> str:
+    """Resolve a HEF path, making relative paths relative to the project root."""
+    if not os.path.isabs(hef_path):
+        hef_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), hef_path)
+    if not os.path.exists(hef_path):
+        raise FileNotFoundError(f"HEF not found at {hef_path}")
+    return hef_path
 
-    if _vlm_instance is not None:
-        shape = _vlm_instance.input_frame_shape()
-        dtype = _vlm_instance.input_frame_format_type()
-        return _vlm_instance, shape, dtype
 
-    hef = VLM_HEF_PATH
-    if not os.path.isabs(hef):
-        # Resolve relative to project root (where the scripts live)
-        hef = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), hef)
-
-    if not os.path.exists(hef):
-        raise FileNotFoundError(f"VLM HEF not found at {hef}. Run setup.sh to download it.")
+def _get_vdevice():
+    """Return the VDevice singleton, creating it on first call."""
+    global _vdevice
+    if _vdevice is not None:
+        return _vdevice
 
     from hailo_platform import VDevice
-    from hailo_platform.genai import VLM
 
-    logger.info(f"Initialising Hailo VLM from {hef} ...")
-    try:
-        params = VDevice.create_params()
-        params.group_id = "SHARED"          # coexist with hailo-ollama on the NPU
-        _vlm_vdevice = VDevice(params)
-        _vlm_instance = VLM(_vlm_vdevice, hef)
-    except Exception:
-        # Release partially-initialised resources so the device isn't leaked
-        if _vlm_vdevice is not None:
-            try:
-                _vlm_vdevice.release()
-            except Exception:
-                pass
-        _vlm_vdevice = None
-        _vlm_instance = None
-        raise
-
-    shape = _vlm_instance.input_frame_shape()
-    dtype = _vlm_instance.input_frame_format_type()
-    logger.info(f"VLM ready — frame shape {shape}, dtype {dtype}")
-    return _vlm_instance, shape, dtype
+    _vdevice = VDevice()
+    logger.info("VDevice initialised")
+    return _vdevice
 
 
-def release_vlm():
-    """Release VLM and VDevice resources. Safe to call multiple times."""
-    global _vlm_instance, _vlm_vdevice
-    if _vlm_instance is not None:
+def _get_llm():
+    """Return the LLM singleton, initialising on first call."""
+    global _llm_instance
+    if _llm_instance is not None:
+        return _llm_instance
+
+    from hailo_platform.genai import LLM
+
+    hef = _resolve_hef(LLM_HEF_PATH)
+    vdevice = _get_vdevice()
+
+    logger.info(f"Initialising Hailo LLM from {hef} ...")
+    _llm_instance = LLM(vdevice, hef)
+    logger.info("LLM ready")
+    return _llm_instance
+
+
+def _release_llm():
+    """Release LLM + VDevice to free the NPU for VLM subprocess."""
+    global _llm_instance, _vdevice
+    if _llm_instance is not None:
         try:
-            _vlm_instance.clear_context()
-            _vlm_instance.release()
+            _llm_instance.release()
         except Exception as e:
-            logger.warning(f"Error releasing VLM: {e}")
-        _vlm_instance = None
-    if _vlm_vdevice is not None:
+            logger.warning(f"Error releasing LLM: {e}")
+        _llm_instance = None
+    if _vdevice is not None:
         try:
-            _vlm_vdevice.release()
+            _vdevice.release()
         except Exception as e:
             logger.warning(f"Error releasing VDevice: {e}")
-        _vlm_vdevice = None
+        _vdevice = None
+    logger.info("LLM + VDevice released for VLM subprocess")
+
+
+def init_llm():
+    """Eagerly initialise VDevice + LLM at startup, and cache the system prompt
+    KV state so it doesn't need to be re-processed on every turn."""
+    global _system_context
+    llm = _get_llm()
+
+    if _system_context is None:
+        # Prime the KV cache with the system prompt
+        system_prompt = [{"role": "system", "content": get_system_prompt()}]
+        logger.info("Caching system prompt context ...")
+        try:
+            llm.generate_all(prompt=system_prompt, max_generated_tokens=1)
+            _system_context = llm.save_context()
+            logger.info("System prompt context cached")
+        except Exception as e:
+            logger.warning(f"Failed to cache system prompt context: {e}")
+            _system_context = None
+
+
+def is_llm_ready() -> bool:
+    """Return True if the LLM singleton has been initialised."""
+    return _llm_instance is not None
+
+
+def _prepare_prompt(history: list) -> list:
+    """Load cached system prompt context if available, and return the
+    prompt messages (without the system message, since it's in the KV cache)."""
+    if _system_context is not None and _llm_instance is not None:
+        try:
+            _llm_instance.load_context(_system_context)
+            # Skip the system message — it's already baked into the KV cache
+            return [msg for msg in history if msg.get("role") != "system"]
+        except Exception as e:
+            logger.warning(f"Failed to load cached context, using full prompt: {e}")
+    return history
 
 
 # --------------------------------------------------------------------------- #
-#  hailo-ollama lifecycle helpers
+#  Hailo VLM (Vision Language Model) — runs in a child process
 # --------------------------------------------------------------------------- #
-# The Hailo-10H NPU can only be held by one process at a time.  hailo-ollama
-# (LLM server) keeps the device open, so we must stop it before loading the
-# VLM and restart it afterwards.
+# The Hailo-10H NPU cannot hold LLM (2.3GB) + VLM (2.3GB) simultaneously,
+# and in-process .release() doesn't fully free NPU driver state.  The proven
+# pattern (from hailo-apps vlm_chat) is to run VLM in a separate process —
+# process exit guarantees clean NPU release.
+#
+# Flow: release LLM → fork child → child creates VDevice + VLM → inference →
+#       child exits (NPU freed) → parent reloads LLM.
 
-def _stop_hailo_ollama() -> bool:
-    """Stop all hailo-ollama processes. Returns True if any were killed."""
-    try:
-        result = subprocess.run(["pkill", "-f", "hailo-ollama serve"],
-                                capture_output=True, timeout=5)
-        if result.returncode == 0:
-            # Give the NPU time to release
-            time.sleep(1.5)
-            logger.info("Stopped hailo-ollama to free NPU for VLM")
-            return True
-    except Exception as e:
-        logger.warning(f"Failed to stop hailo-ollama: {e}")
-    return False
+_CAMERA_TRIGGER_PHRASES = [
+    "take a photo", "take a picture", "take photo", "take picture",
+    "look at", "what do you see", "what can you see", "use your camera",
+    "photograph", "snap a photo",
+]
 
-
-def _start_hailo_ollama():
-    """Restart hailo-ollama in the background."""
-    try:
-        env = os.environ.copy()
-        env["OLLAMA_HOST"] = "0.0.0.0:8000"
-        subprocess.Popen(
-            ["hailo-ollama", "serve"],
-            stdout=open("/tmp/ollama.log", "a"),
-            stderr=subprocess.STDOUT,
-            env=env,
-            start_new_session=True,     # detach from our process group
-        )
-        logger.info("Restarted hailo-ollama")
-        # Wait for it to be ready before returning
-        for _ in range(20):
-            time.sleep(0.5)
-            try:
-                r = requests.get("http://127.0.0.1:8000/api/tags", timeout=2)
-                if r.status_code == 200:
-                    logger.info("hailo-ollama is ready")
-                    return
-            except requests.ConnectionError:
-                pass
-        logger.warning("hailo-ollama started but didn't become ready within 10s")
-    except Exception as e:
-        logger.error(f"Failed to restart hailo-ollama: {e}")
+def _vlm_question(user_text: str) -> str:
+    """Convert camera-trigger phrases into an actual VLM question."""
+    if not user_text or user_text.lower().strip().rstrip(".!?") in [
+        p.rstrip(".!?") for p in _CAMERA_TRIGGER_PHRASES
+    ]:
+        return "What do you see in this image? Describe it briefly."
+    return user_text
 
 
-def _decode_image_to_frame(image_b64: str, target_shape, target_dtype=np.uint8):
-    """Decode a base64 JPEG/PNG into a numpy array matching VLM input requirements.
-
-    Uses a central-crop strategy (resize to cover + center crop) so the image
-    is never stretched or distorted — matching the hailo-apps reference impl.
-    """
+def _vlm_worker(image_b64: str, user_text: str, vlm_hef: str, result_queue):
+    """Run VLM inference in a child process with its own VDevice.
+    Puts the result string into result_queue."""
     import cv2
+    try:
+        from hailo_platform import VDevice
+        from hailo_platform.genai import VLM
 
-    raw = base64.b64decode(image_b64)
-    arr = np.frombuffer(raw, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Failed to decode image from base64 data")
+        vdevice = VDevice()
+        vlm = VLM(vdevice, vlm_hef)
 
-    # OpenCV loads BGR; VLM expects RGB
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        shape = vlm.input_frame_shape()
+        dtype = vlm.input_frame_format_type()
 
-    target_h, target_w = target_shape[0], target_shape[1]
-    src_h, src_w = img.shape[:2]
+        # Decode image
+        raw = base64.b64decode(image_b64)
+        arr = np.frombuffer(raw, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            result_queue.put("ERROR:Failed to decode image")
+            return
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    if src_h != target_h or src_w != target_w:
-        # Scale to cover the target size, then center-crop (preserves aspect ratio)
-        scale = max(target_w / src_w, target_h / src_h)
-        new_w = int(src_w * scale)
-        new_h = int(src_h * scale)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        target_h, target_w = shape[0], shape[1]
+        src_h, src_w = img.shape[:2]
+        if src_h != target_h or src_w != target_w:
+            scale = max(target_w / src_w, target_h / src_h)
+            new_w = int(src_w * scale)
+            new_h = int(src_h * scale)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            x_start = (new_w - target_w) // 2
+            y_start = (new_h - target_h) // 2
+            img = img[y_start:y_start + target_h, x_start:x_start + target_w]
+        frame = img.astype(dtype)
 
-        x_start = (new_w - target_w) // 2
-        y_start = (new_h - target_h) // 2
-        img = img[y_start:y_start + target_h, x_start:x_start + target_w]
+        prompt = [
+            {"role": "system", "content": [
+                {"type": "text", "text": "You are BMO, a helpful robot assistant. Describe what you see concisely and conversationally in English."}
+            ]},
+            {"role": "user", "content": [
+                {"type": "image"},
+                {"type": "text", "text": _vlm_question(user_text)}
+            ]}
+        ]
 
-    return img.astype(target_dtype)
+        vlm.clear_context()
+        content = vlm.generate_all(
+            prompt=prompt, frames=[frame],
+            max_generated_tokens=200, temperature=0.4, seed=42,
+        )
+
+        # Clean up stop tokens
+        for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+            content = content.replace(tok, "")
+        content = content.replace('\u201c', '"').replace('\u201d', '"')
+        content = content.replace('\u2018', "'").replace('\u2019', "'")
+        content = content.strip()
+
+        vlm.clear_context()
+        vlm.release()
+        vdevice.release()
+
+        result_queue.put(content)
+    except Exception as e:
+        result_queue.put(f"ERROR:{e}")
+
 
 # Keep at most this many messages (plus the system prompt) to avoid
 # unbounded memory growth on memory-constrained devices like a Pi.
@@ -232,6 +272,7 @@ def _strip_prompt_leakage(content: str) -> str:
     return content
 
 
+
 class Brain:
     def __init__(self):
         self.history = [{"role": "system", "content": get_system_prompt()}]
@@ -245,7 +286,7 @@ class Brain:
 
     def think(self, user_text: str) -> str:
         """
-        Send text to local LLM (Hailo/Ollama) and get response.
+        Send text to Hailo LLM (direct NPU API) and get response.
         """
         self.history.append({"role": "user", "content": user_text})
 
@@ -312,115 +353,83 @@ class Brain:
             except Exception as e:
                 logger.warning(f"Pre-LLM web search failed: {e}")
 
-        # Simple heuristic to route to a faster model for simple chat
-        complex_keywords = ["explain", "story", "how", "why", "code", "write", "create", "analyze", "compare", "difference", "history", "long"]
-        words = user_text.lower().split()
-        
-        chosen_model = FAST_LLM_MODEL
-        if len(words) > 15 or any(kw in words for kw in complex_keywords):
-            chosen_model = LLM_MODEL
-
-        payload = {
-            "model": chosen_model,
-            "messages": self.history,
-            "stream": False,
-            "options": {
-                "temperature": 0.4,
-                "num_predict": 180,  # increased to prevent responses getting cut off
-            }
-        }
-
         try:
-            logger.info(f"Sending request to LLM ({chosen_model}): {LLM_URL}")
-            response = requests.post(LLM_URL, json=payload, timeout=180)
-            
-            if response.status_code == 200:
-                data = response.json()
-                content = data.get("message", {}).get("content", "")
-                
-                # Check if the LLM outputted a JSON action (like search_web)
-                try:
-                    # Try to find JSON in the response (non-greedy)
-                    # Also replace smart quotes with standard quotes before parsing
-                    clean_content = content.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
-                    json_match = re.search(r'\{.*?\}', clean_content, re.DOTALL)
-                    if json_match:
-                        action_data = json.loads(json_match.group(0))
-                        
-                        if action_data.get("action") == "take_photo":
-                            logger.info("LLM requested to take a photo.")
-                            # Return the JSON string directly so the caller can handle the camera
-                            return json.dumps({"action": "take_photo"})
-                            
-                        elif action_data.get("action") == "search_web":
-                            query = action_data.get("query", "")
-                            logger.info(f"LLM requested web search for: {query}")
-                            
-                            # Perform the search
-                            search_result = search_web(query)
-                            
-                            # Feed the result back to the LLM to summarize
-                            summary_prompt = [
-                                {"role": "system", "content": "Summarize this search result in one short, conversational sentence as BMO. Do not use markdown."},
-                                {"role": "user", "content": f"RESULT: {search_result}\nUser Question: {user_text}"}
-                            ]
-                            
-                            summary_payload = {
-                                "model": FAST_LLM_MODEL,
-                                "messages": summary_prompt,
-                                "stream": False
-                            }
-                            
-                            summary_response = requests.post(LLM_URL, json=summary_payload, timeout=180)
-                            if summary_response.status_code == 200:
-                                content = summary_response.json().get("message", {}).get("content", "")
-                            else:
-                                content = "I tried to search the web, but my brain got confused reading the results."
-                except json.JSONDecodeError:
-                    pass # Not valid JSON, just treat as normal text
-                
-                # Check for pronunciation learning tag
-                pronounce_match = re.search(r'!PRONOUNCE:\s*([a-zA-Z0-9_-]+)\s*=\s*([a-zA-Z0-9_-]+)', content, re.IGNORECASE)
-                if pronounce_match:
-                    word = pronounce_match.group(1).strip()
-                    phonetic = pronounce_match.group(2).strip()
-                    logger.info(f"Learned new pronunciation from LLM: {word} -> {phonetic}")
-                    add_pronunciation(word, phonetic)
-                    # Remove the tag from the spoken content
-                    content = re.sub(r'!PRONOUNCE:.*', '', content, flags=re.IGNORECASE).strip()
+            llm = _get_llm()
+            prompt = _prepare_prompt(self.history)
+            logger.info("Sending request to Hailo LLM (direct NPU)")
+            content = llm.generate_all(prompt=prompt, temperature=0.4, max_generated_tokens=180)
 
-                # Strip any system prompt leakage from the response
-                content = _strip_prompt_leakage(content)
+            # Strip stop tokens the model may emit
+            for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+                content = content.replace(tok, "")
+            content = content.strip()
 
-                # Ensure BMO is spelled correctly in text responses
-                content = re.sub(r'\bBeemo\b', 'BMO', content, flags=re.IGNORECASE)
+            # Check if the LLM outputted a JSON action (like search_web)
+            try:
+                # Replace smart quotes with standard quotes before parsing
+                clean_content = content.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
+                json_match = re.search(r'\{.*?\}', clean_content, re.DOTALL)
+                if json_match:
+                    action_data = json.loads(json_match.group(0))
 
-                # Fallback if filtering left nothing useful
-                if not content.strip():
-                    content = "BMO is here! How can I help?"
+                    if action_data.get("action") == "take_photo":
+                        logger.info("LLM requested to take a photo.")
+                        return json.dumps({"action": "take_photo"})
 
-                self.history.append({"role": "assistant", "content": content})
+                    elif action_data.get("action") == "search_web":
+                        query = action_data.get("query", "")
+                        logger.info(f"LLM requested web search for: {query}")
 
-                # Clean injected search context from history so it doesn't
-                # accumulate and confuse the model on future turns.
-                if search_injected:
-                    for msg in reversed(self.history):
-                        if msg.get("role") == "user" and msg.get("content", "").startswith("[LIVE DATA:"):
-                            msg["content"] = user_text
-                            break
+                        # Perform the search
+                        search_result = search_web(query)
 
-                self._trim_history()
-                return content
+                        # Feed the result back to the LLM to summarize
+                        summary_messages = [
+                            {"role": "system", "content": "Summarize this search result in one short, conversational sentence as BMO. Do not use markdown."},
+                            {"role": "user", "content": f"RESULT: {search_result}\nUser Question: {user_text}"}
+                        ]
+                        content = llm.generate_all(prompt=summary_messages, temperature=0.4, max_generated_tokens=180)
+                        for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+                            content = content.replace(tok, "")
+                        content = content.strip()
+            except json.JSONDecodeError:
+                pass  # Not valid JSON, just treat as normal text
 
-            else:
-                logger.error(f"LLM Error: {response.status_code} - {response.text}")
-                return f"Error: {response.status_code}"
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Connection Error: {e}")
-            return "Could not connect to my brain. Is the Hailo server running?"
+            # Check for pronunciation learning tag
+            pronounce_match = re.search(r'!PRONOUNCE:\s*([a-zA-Z0-9_-]+)\s*=\s*([a-zA-Z0-9_-]+)', content, re.IGNORECASE)
+            if pronounce_match:
+                word = pronounce_match.group(1).strip()
+                phonetic = pronounce_match.group(2).strip()
+                logger.info(f"Learned new pronunciation from LLM: {word} -> {phonetic}")
+                add_pronunciation(word, phonetic)
+                # Remove the tag from the spoken content
+                content = re.sub(r'!PRONOUNCE:.*', '', content, flags=re.IGNORECASE).strip()
+
+            # Strip any system prompt leakage from the response
+            content = _strip_prompt_leakage(content)
+
+            # Ensure BMO is spelled correctly in text responses
+            content = re.sub(r'\bBeemo\b', 'BMO', content, flags=re.IGNORECASE)
+
+            # Fallback if filtering left nothing useful
+            if not content.strip():
+                content = "BMO is here! How can I help?"
+
+            self.history.append({"role": "assistant", "content": content})
+
+            # Clean injected search context from history so it doesn't
+            # accumulate and confuse the model on future turns.
+            if search_injected:
+                for msg in reversed(self.history):
+                    if msg.get("role") == "user" and msg.get("content", "").startswith("[LIVE DATA:"):
+                        msg["content"] = user_text
+                        break
+
+            self._trim_history()
+            return content
+
         except Exception as e:
-            logger.error(f"Brain Exception: {e}")
+            logger.error(f"Brain Exception: {e}", exc_info=True)
             return "I'm having trouble thinking right now."
 
     def get_history(self):
@@ -428,7 +437,7 @@ class Brain:
 
     def stream_think(self, user_text: str):
         """
-        Send text to local LLM and yield full sentences as they are generated.
+        Send text to Hailo LLM and yield full sentences as they are generated.
         Useful for TTS chunking (speaking while generating).
         """
         self.history.append({"role": "user", "content": user_text})
@@ -437,7 +446,6 @@ class Brain:
 
         # Pre-LLM camera check: if user asks to take a photo / look at something,
         # emit the action JSON directly without calling the LLM.
-        # This is more reliable than hoping the small model emits the right JSON.
         camera_keywords = [
             "take a photo", "take a picture", "take photo", "take picture",
             "look at", "what do you see", "what can you see", "use your camera",
@@ -471,9 +479,6 @@ class Brain:
 
         # Pre-LLM keyword check: if the question likely needs real-time info,
         # do the web search now rather than relying on the model to emit JSON.
-        # Require at least one realtime keyword AND the text to look like a question
-        # (contains 'what', 'who', 'when', 'find', 'search', '?', etc.) to avoid
-        # false triggers on casual phrases like 'how are you doing today'.
         realtime_keywords = [
             "weather", "forecast", "temperature", "tonight", "tomorrow",
             "news", "latest", "right now", "score", "stocks", "bitcoin",
@@ -502,93 +507,68 @@ class Brain:
             except Exception as e:
                 logger.warning(f"Pre-LLM web search failed: {e}")
 
-        # Simple heuristic to route to a faster model for simple chat
-        complex_keywords = ["explain", "story", "how", "why", "code", "write", "create", "analyze", "compare", "difference", "history", "long"]
-        words = user_text.lower().split()
-        
-        chosen_model = FAST_LLM_MODEL
-        if len(words) > 15 or any(kw in words for kw in complex_keywords):
-            chosen_model = LLM_MODEL
-
-
-
-        payload = {
-            "model": chosen_model,
-            "messages": self.history,
-            "stream": True,
-            "options": {
-                "temperature": 0.4,
-                "num_predict": 180,  # increased to prevent responses getting cut off
-            }
-        }
-
         full_content = ""
         buffer = ""
-        
+
         try:
-            logger.info(f"Stream request to LLM ({chosen_model}): {LLM_URL}")
-            with requests.post(LLM_URL, json=payload, stream=True, timeout=180) as response:
-                if response.status_code == 200:
-                    for line in response.iter_lines():
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                chunk = data.get("message", {}).get("content", "")
-                                if not chunk:
-                                    continue
-                                    
-                                # Replace smart quotes
-                                chunk = chunk.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
-                                
-                                buffer += chunk
-                                full_content += chunk
-                                
-                                # If buffer ends with punctuation or newline, yield it
-                                if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
-                                    # Strip system prompt leakage
-                                    cleaned = _strip_prompt_leakage(buffer)
-                                    # Ensure BMO spelling before yielding
-                                    out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
-                                    if out_chunk.strip():
-                                        yield out_chunk
-                                    buffer = ""
-                                    
-                            except json.JSONDecodeError:
-                                pass
-                                
-                    # Yield any remaining buffer
-                    if buffer.strip():
+            llm = _get_llm()
+            prompt = _prepare_prompt(self.history)
+            logger.info("Stream request to Hailo LLM (direct NPU)")
+
+            with llm.generate(prompt=prompt, temperature=0.4, max_generated_tokens=180) as gen:
+                for token in gen:
+                    if not token:
+                        continue
+
+                    # Strip stop tokens inline
+                    for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+                        token = token.replace(tok, "")
+                    if not token:
+                        continue
+
+                    # Replace smart quotes
+                    token = token.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
+
+                    buffer += token
+                    full_content += token
+
+                    # If buffer ends with punctuation or newline, yield it
+                    if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
+                        # Strip system prompt leakage
                         cleaned = _strip_prompt_leakage(buffer)
+                        # Ensure BMO spelling before yielding
                         out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
                         if out_chunk.strip():
                             yield out_chunk
-                        
-                    # Handle json actions at the very end if applicable
-                    json_match = re.search(r'\{.*?\}', full_content, re.DOTALL)
-                    if json_match and "action" in json_match.group(0):
-                        # For advanced tool use we won't yield the json action to TTS
-                        pass 
-                    
-                    self.history.append({"role": "assistant", "content": full_content})
+                        buffer = ""
 
-                    # Clean injected search context from history so it doesn't
-                    # accumulate and confuse the model on future turns.
-                    if search_injected:
-                        for msg in reversed(self.history):
-                            if msg.get("role") == "user" and msg.get("content", "").startswith("[LIVE DATA:"):
-                                msg["content"] = user_text
-                                break
+            # Yield any remaining buffer
+            if buffer.strip():
+                cleaned = _strip_prompt_leakage(buffer)
+                out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
+                if out_chunk.strip():
+                    yield out_chunk
 
-                    self._trim_history()
+            # Handle json actions at the very end if applicable
+            json_match = re.search(r'\{.*?\}', full_content, re.DOTALL)
+            if json_match and "action" in json_match.group(0):
+                # For advanced tool use we won't yield the json action to TTS
+                pass
 
-                else:
-                    logger.error(f"LLM Stream Error: {response.status_code} - {response.text}")
-                    yield "I'm having trouble thinking."
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Connection Error: {e}")
-            yield "Could not connect to my brain."
+            self.history.append({"role": "assistant", "content": full_content})
+
+            # Clean injected search context from history so it doesn't
+            # accumulate and confuse the model on future turns.
+            if search_injected:
+                for msg in reversed(self.history):
+                    if msg.get("role") == "user" and msg.get("content", "").startswith("[LIVE DATA:"):
+                        msg["content"] = user_text
+                        break
+
+            self._trim_history()
+
         except Exception as e:
-            logger.error(f"Brain Exception: {e}")
+            logger.error(f"Brain Exception: {e}", exc_info=True)
             yield "I'm having trouble right now."
 
     def set_history(self, new_history):
@@ -601,83 +581,66 @@ class Brain:
 
     def analyze_image(self, image_base64: str, user_text: str) -> str:
         """
-        Analyse an image using the Hailo VLM (Qwen2-VL-2B) running directly
-        on the NPU via the HailoRT Python API.  Falls back to a polite error
-        message if the HEF isn't available or the hardware can't be reached.
+        Analyse an image using the Hailo VLM (Qwen2-VL-2B) in a child process.
+        The NPU can only hold one large model at a time, so we release the LLM,
+        fork a child for VLM inference, then reload the LLM when it exits.
         """
+        import multiprocessing as mp
+
         # Strip data URI prefix if present (browser sends "data:image/jpeg;base64,...")
         if "," in image_base64:
             image_base64 = image_base64.split(",")[1]
 
-        # We don't append the image to the main history to save context window,
-        # but we do append the user's question and the assistant's answer.
         self.history.append({"role": "user", "content": user_text})
 
-        # Stop hailo-ollama so the NPU is free for VLM
-        ollama_was_running = _stop_hailo_ollama()
-
         try:
-            vlm, frame_shape, frame_dtype = _get_vlm()
-
-            # Decode the base64 image into a numpy frame the VLM expects
-            frame = _decode_image_to_frame(image_base64, frame_shape, frame_dtype)
-
-            # Build the structured prompt expected by the Qwen2-VL model
-            prompt = [
-                {"role": "system", "content": [
-                    {"type": "text", "text": "You are BMO, a helpful robot assistant. Describe what you see concisely and conversationally in English."}
-                ]},
-                {"role": "user", "content": [
-                    {"type": "image"},
-                    {"type": "text", "text": user_text or "What do you see in this image?"}
-                ]}
-            ]
-
-            logger.info("Running VLM inference on Hailo NPU ...")
-            vlm.clear_context()
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    vlm.generate_all,
-                    prompt=prompt,
-                    frames=[frame],
-                    max_generated_tokens=200,
-                    temperature=0.4,
-                    seed=42,
-                )
-                try:
-                    content = future.result(timeout=60)
-                except concurrent.futures.TimeoutError:
-                    logger.warning("VLM inference timed out after 60 seconds")
-                    vlm.clear_context()
-                    return "BMO looked too long and got dizzy! Try again?"
-
-            # Clean up any smart quotes, stop tokens, or stray formatting
-            content = content.replace('\u201c', '"').replace('\u201d', '"')
-            content = content.replace('\u2018', "'").replace('\u2019', "'")
-            for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
-                content = content.replace(tok, "")
-            content = content.strip()
-
-            logger.info(f"VLM response ({len(content)} chars): {content[:120]}...")
-
-            self.history.append({"role": "assistant", "content": content})
-            return content
-
+            vlm_hef = _resolve_hef(VLM_HEF_PATH)
         except FileNotFoundError as e:
             logger.warning(f"VLM HEF not found: {e}")
             return "BMO's vision model isn't installed yet. Run setup.sh to download it!"
+
+        # Release LLM + VDevice so the child process can claim the NPU
+        _release_llm()
+
+        try:
+            result_queue = mp.Queue()
+            proc = mp.Process(
+                target=_vlm_worker,
+                args=(image_base64, user_text, vlm_hef, result_queue),
+            )
+            logger.info("Starting VLM subprocess ...")
+            proc.start()
+            proc.join(timeout=90)
+
+            if proc.is_alive():
+                logger.warning("VLM subprocess timed out, killing it")
+                proc.kill()
+                proc.join(timeout=5)
+                return "BMO looked too long and got dizzy! Try again?"
+
+            if proc.exitcode != 0:
+                logger.error(f"VLM subprocess exited with code {proc.exitcode}")
+                return "I tried to look, but my eyes aren't working right now."
+
+            try:
+                content = result_queue.get_nowait()
+            except Exception:
+                return "I tried to look, but my eyes aren't working right now."
+
+            if content.startswith("ERROR:"):
+                logger.error(f"VLM subprocess error: {content}")
+                return "I tried to look, but my eyes aren't working right now."
+
+            logger.info(f"VLM response ({len(content)} chars): {content[:120]}...")
+            self.history.append({"role": "assistant", "content": content})
+            return content
+
         except Exception as e:
             logger.error(f"VLM Exception: {e}", exc_info=True)
-            # Ensure VLM context is clean for the next call
-            try:
-                if _vlm_instance is not None:
-                    _vlm_instance.clear_context()
-            except Exception:
-                pass
             return "I tried to look, but my eyes aren't working right now."
         finally:
-            # Release VLM so the NPU is free, then restart hailo-ollama
-            release_vlm()
-            if ollama_was_running:
-                _start_hailo_ollama()
+            # Reload LLM + re-cache system prompt so text inference is ready again
+            global _system_context
+            logger.info("Reloading LLM after VLM subprocess ...")
+            _system_context = None
+            init_llm()
