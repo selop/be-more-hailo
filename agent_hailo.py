@@ -101,13 +101,14 @@ class BotGUI:
         self.stop_event = threading.Event()
         self.thinking_sound_active = threading.Event()
         self.tts_active = threading.Event()
-        self._interrupted = threading.Event()  # Set when wake word fires during speech
+        # self._interrupted removed — mid-speech wake word detection caused ALSA contention
         self.current_state = BotStates.WARMUP
         self.last_state_change = time.time()
         
         # Audio State
         self.current_audio_process = None
         self.tts_queue = []
+        self.current_display_image = None  # Set when a photo/image is shown on screen
 
         # Memory
         self.brain = Brain()
@@ -303,8 +304,8 @@ class BotGUI:
             self.animations[BotStates.SCREENSAVER].extend(seq * 2)
     
     def update_animation(self):
-        if self.current_state == BotStates.DISPLAY_IMAGE:
-            # Don't animate, just wait
+        if self.current_state == BotStates.DISPLAY_IMAGE or self.current_display_image is not None:
+            # Don't animate — a photo or image is being shown
             self.master.after(500, self.update_animation)
             return
 
@@ -363,8 +364,7 @@ class BotGUI:
 
     # --- AUDIO INPUT ---
     def wait_for_wakeword(self, oww):
-        """Block until wake word is heard. Also monitors during SPEAKING state
-        to support mid-speech interruption."""
+        """Block until wake word is heard."""
         CHUNK = 1280
         capture_rate = MIC_SAMPLE_RATE
         target_rate = 16000
@@ -373,16 +373,11 @@ class BotGUI:
         try:
             with sd.InputStream(samplerate=capture_rate, device=MIC_DEVICE_INDEX, channels=1, dtype='int16') as stream:
                 while not self.stop_event.is_set():
-                    # If interrupted during speech, the main loop already knows —
-                    # return immediately so it can start recording
-                    if self._interrupted.is_set():
-                        return True
-
                     data, _ = stream.read(CHUNK * downsample_factor)
                     audio_16k = data[::downsample_factor].flatten()
 
-                    # Suppress during music and recording (mic is in use)
-                    if self.current_state in (BotStates.JAMMING, BotStates.LISTENING):
+                    # Suppress during speech, music, and recording
+                    if self.current_state in (BotStates.SPEAKING, BotStates.JAMMING, BotStates.LISTENING):
                         oww.reset()
                         continue
 
@@ -390,15 +385,7 @@ class BotGUI:
 
                     for key in oww.prediction_buffer.keys():
                         if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
-                            # If BMO is speaking, interrupt playback and signal the stream loop
-                            if self.current_state == BotStates.SPEAKING:
-                                bmo_print("WAKE", f"Detected during speech — interrupting!")
-                                self._interrupted.set()
-                                player = get_player()
-                                if player:
-                                    player.stop_playback()
-                            else:
-                                bmo_print("WAKE", f"Detected: {key}")
+                            bmo_print("WAKE", f"Detected: {key}")
                             oww.reset()
                             return True
         except Exception as e:
@@ -489,14 +476,9 @@ class BotGUI:
         bmo_print("STT", "Transcribing...")
         return transcribe_audio(filename)
 
-    def speak(self, text, msg="Speaking...", interruptible=True):
+    def speak(self, text, msg="Speaking..."):
         clean_text = clean_text_for_speech(text)
         if not clean_text or not any(c.isalnum() for c in clean_text):
-            return
-
-        # Skip if interrupted (wake word fired during previous sentence)
-        if interruptible and self._interrupted.is_set():
-            bmo_print("TTS", f"Skipped (interrupted): {clean_text[:30]}...")
             return
 
         bmo_print("TTS", f"Speaking: {clean_text[:30]}...")
@@ -692,7 +674,6 @@ class BotGUI:
         while not self.stop_event.is_set():
             # 1. Wait for Wake Word
             if self.wait_for_wakeword(oww):
-                self._interrupted.clear()
                 # 2. Record
                 self.set_state(BotStates.LISTENING, "Listening...")
                 wav_file = self.record_audio()
@@ -742,37 +723,6 @@ class BotGUI:
                         pass
                     self.thinking_audio_process = None
 
-                # Start background wake word listener for mid-speech interruption
-                _ww_stop = threading.Event()
-                def _background_wakeword():
-                    """Listen for wake word during LLM streaming + TTS.
-                    Sets _interrupted and stops playback if detected."""
-                    CHUNK = 1280
-                    ds = MIC_SAMPLE_RATE // 16000
-                    try:
-                        with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX,
-                                            channels=1, dtype='int16') as stream:
-                            while not _ww_stop.is_set() and not self.stop_event.is_set():
-                                data, _ = stream.read(CHUNK * ds)
-                                if self.current_state != BotStates.SPEAKING:
-                                    oww.reset()
-                                    continue
-                                audio_16k = data[::ds].flatten()
-                                oww.predict(audio_16k)
-                                for key in oww.prediction_buffer.keys():
-                                    if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
-                                        bmo_print("WAKE", "Detected during speech — interrupting!")
-                                        self._interrupted.set()
-                                        p = get_player()
-                                        if p:
-                                            p.stop_playback()
-                                        oww.reset()
-                                        return
-                    except Exception:
-                        pass
-                ww_thread = threading.Thread(target=_background_wakeword, daemon=True)
-                ww_thread.start()
-
                 try:
                     full_response = ""
                     image_url = None
@@ -780,9 +730,6 @@ class BotGUI:
                     music_triggered = False
 
                     for chunk in self.brain.stream_think(user_text):
-                        if self._interrupted.is_set():
-                            bmo_print("AGENT", "Speech interrupted by wake word — breaking stream")
-                            break
                         if not chunk.strip():
                             continue
 
@@ -852,21 +799,24 @@ class BotGUI:
                             self.speak(chunk)
 
                     if taking_photo:
-                        # Stop background wake word listener — not useful during photo capture
-                        # and BMO's own speech can trigger false interruptions
-                        _ww_stop.set()
-                        ww_thread.join(timeout=3)
-                        self._interrupted.clear()
-                        # Kill any thinking audio from the STT phase before camera UX
+                        # Stop thinking sound loop by changing state (breaks the while loop)
+                        # then kill any currently playing sound
+                        self.set_state(BotStates.CAPTURING, "Camera mode!")
                         if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
                             try:
                                 self.thinking_audio_process.terminate()
                             except Exception:
                                 pass
                             self.thinking_audio_process = None
+                        time.sleep(0.2)  # let aplay process exit
                         # Clear transcription bubble so it doesn't clip the camera face
                         self.bubble.hide()
-                        # --- Camera UX: animated face + spoken intro + shutter ---
+                        # Start releasing LLM+STT in background while camera UX plays
+                        # (speech + aplay don't use the NPU, so this is safe)
+                        from core.llm import _release_llm
+                        release_thread = threading.Thread(target=_release_llm, daemon=True)
+                        release_thread.start()
+                        # --- Camera UX: spoken intro + shutter ---
                         self.speak(random.choice(t("camera_intros")))
                         self.set_state(BotStates.CAPTURING, "Say cheese!")
                         time.sleep(2)
@@ -885,6 +835,31 @@ class BotGUI:
                             import base64
                             with open('temp.jpg', 'rb') as img_file:
                                 b64_string = base64.b64encode(img_file.read()).decode('utf-8')
+
+                            # Display captured photo immediately
+                            try:
+                                from PIL import ImageOps
+                                photo_img = Image.open('temp.jpg')
+                                lcd_w, lcd_h = self.BG_WIDTH - 60, self.BG_HEIGHT - 60
+                                img_ratio = photo_img.width / photo_img.height
+                                target_ratio = lcd_w / lcd_h
+                                if img_ratio > target_ratio:
+                                    new_h = lcd_h
+                                    new_w = int(new_h * img_ratio)
+                                else:
+                                    new_w = lcd_w
+                                    new_h = int(new_w / img_ratio)
+                                photo_img = photo_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                                left = (new_w - lcd_w) // 2
+                                top = (new_h - lcd_h) // 2
+                                photo_img = photo_img.crop((left, top, left + lcd_w, top + lcd_h))
+                                photo_img = ImageOps.expand(photo_img, border=10, fill="#1c201a")
+                                photo_img = ImageOps.expand(photo_img, border=20, fill="#38b5a0")
+                                self.current_display_image = ImageTk.PhotoImage(photo_img)
+                                self.background_label.config(image=self.current_display_image)
+                            except Exception as e:
+                                bmo_print("CAMERA", f"Photo display error: {e}")
+
                             self.set_state(BotStates.THINKING, "Analyzing...")
 
                             def play_analyzing_sequence():
@@ -900,6 +875,8 @@ class BotGUI:
                                         time.sleep(0.1)
 
                             threading.Thread(target=play_analyzing_sequence, daemon=True).start()
+                            # Ensure NPU is fully released before VLM subprocess claims it
+                            release_thread.join(timeout=10)
                             response = self.brain.analyze_image(b64_string, user_text)
                             if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
                                 try:
@@ -907,7 +884,17 @@ class BotGUI:
                                 except Exception:
                                     pass
                                 self.thinking_audio_process = None
+                            # Photo is already displayed — speak VLM response over it
                             self.speak(response)
+
+                            # Keep photo displayed during LLM+STT reload
+                            self.set_state(BotStates.WARMUP, "Reloading Brain...")
+                            self.play_sound("boot_sounds")
+                            from core.llm import reload_after_vlm
+                            reload_after_vlm()
+
+                            # Restore face animation after reload complete
+                            self.current_display_image = None
                         except FileNotFoundError as e:
                             bmo_print("CAMERA", f"Error: {e}")
                             self.speak(t("no_camera"))
@@ -981,17 +968,6 @@ class BotGUI:
                 except Exception as e:
                     bmo_print("ERROR", f"LLM/TTS pipeline: {e}")
                     traceback.print_exc()
-                finally:
-                    # Stop background wake word listener and wait for its mic stream to close
-                    _ww_stop.set()
-                    ww_thread.join(timeout=3)
-                    time.sleep(0.5)  # let ALSA fully release the capture device
-
-                # If interrupted, skip idle — go straight to next wake word cycle
-                # which will immediately return True (flag is already set)
-                if self._interrupted.is_set():
-                    bmo_print("AGENT", "Interrupted — ready for next input")
-                    continue
 
                 self.set_state(BotStates.IDLE, "Ready")
 

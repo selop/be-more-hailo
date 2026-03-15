@@ -66,7 +66,7 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 - **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes
 - **Sentence-streaming TTS**: Response is split sentence-by-sentence; TTS plays each sentence as LLM continues generating
 - **System prompt caching**: `llm.save_context()` / `llm.load_context()` caches system prompt KV state at startup — not re-processed every turn
-- **Mid-speech interruption**: Background wake word listener during TTS; sets `_interrupted` flag and stops playback so user can immediately speak
+- **Wake word suppression**: Wake word detection is suppressed during SPEAKING and JAMMING states to prevent BMO's own audio from triggering false detections
 - **Pronunciation system**: User corrects pronunciation → LLM appends `!PRONOUNCE: word=phonetic` → saved to `pronunciations.json` → Piper substitutions
 - **VLM subprocess swap**: Main process releases STT+LLM+VDevice → forks child → child loads VLM → inference → child exits → parent reloads LLM+STT+system prompt cache
 - **Screensaver**: Triggers after 60s idle, cycles through expression personas, speaks random LLM-generated thoughts every ~30 min (respects night hours 10PM-8AM)

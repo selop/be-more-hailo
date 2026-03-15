@@ -417,14 +417,11 @@ def gen_listening(base_dir="faces/listening"):
         os.remove(f)
 
     # Centered microphone with sound waves entering from both sides
-    # Small mic icon at top — VU meter overlay dominates the center
-    mic_cx, mic_cy = 399, 45
-    mic_w, mic_h = 20, 32      # Small capsule
-    stand_h = 18                # Short stand
-    base_w = 40                 # Narrow base
-
-    # Compact sound wave arcs
-    wave_radii = [45, 32, 20]
+    # Two microphones in eye positions
+    mic_w, mic_h = 22, 36      # Capsule size (fits eye area)
+    stand_h = 16
+    base_w = 36
+    wave_radii = [36, 26, 17]  # Compact waves
     # Left waves face right ))  right waves face left ((
     # Each frame shows different wave positions (rippling inward)
     frame_waves = [
@@ -438,50 +435,49 @@ def gen_listening(base_dir="faces/listening"):
         [0],        # 8: new wave starting (loop)
     ]
 
+    def _draw_mic(d, cx, cy):
+        """Draw a single microphone at (cx, cy)."""
+        s = SCALE
+        cap_color = (60, 60, 60)
+        grille_color = (100, 100, 100)
+        cap_top = cy - mic_h // 2
+        cap_bot = cy + mic_h // 2
+        cap_left = cx - mic_w // 2
+        cap_right = cx + mic_w // 2
+
+        # Capsule
+        cap_box = [cap_left * s, cap_top * s, cap_right * s, cap_bot * s]
+        d.rounded_rectangle(cap_box, radius=mic_w // 2 * s, fill=cap_color,
+                           outline=LINE_COLOR, width=LINE_WIDTH * s)
+        # Grille lines
+        for gy in range(cap_top + 8, cap_bot - 6, 8):
+            d.line([(cap_left + 6) * s, gy * s, (cap_right - 6) * s, gy * s],
+                   fill=grille_color, width=2 * s)
+        # Stand
+        d.line([cx * s, cap_bot * s, cx * s, (cap_bot + stand_h) * s],
+               fill=LINE_COLOR, width=LINE_WIDTH * s)
+        # Base
+        b_y = cap_bot + stand_h
+        draw_line(d, cx - base_w // 2, b_y, cx + base_w // 2, b_y)
+        # Cradle arc
+        draw_arc_eye(d, cx, cap_bot - 4, mic_w // 2 + 6, 0, 180)
+
     for i, visible in enumerate(frame_waves):
         def draw_listen(d, vis=visible):
-            s = SCALE
+            mic_cy = EYE_VISUAL_Y
 
-            # Mic capsule — dark rounded rectangle
-            cap_color = (60, 60, 60)
-            cap_top = mic_cy - mic_h // 2
-            cap_bot = mic_cy + mic_h // 2
-            cap_left = mic_cx - mic_w // 2
-            cap_right = mic_cx + mic_w // 2
-            cap_box = [cap_left * s, cap_top * s, cap_right * s, cap_bot * s]
-            d.rounded_rectangle(cap_box, radius=mic_w // 2 * s, fill=cap_color, outline=LINE_COLOR, width=LINE_WIDTH * s)
+            # Left mic (left eye position)
+            _draw_mic(d, LEFT_EYE_X, mic_cy)
+            # Right mic (right eye position)
+            _draw_mic(d, RIGHT_EYE_X, mic_cy)
 
-            # Mic grille lines (horizontal lines across the capsule)
-            grille_color = (100, 100, 100)
-            for gy in range(cap_top + 12, cap_bot - 8, 10):
-                d.line([(cap_left + 8) * s, gy * s, (cap_right - 8) * s, gy * s],
-                       fill=grille_color, width=2 * s)
-
-            # Stand — vertical line below capsule
-            d.line([mic_cx * s, cap_bot * s, mic_cx * s, (cap_bot + stand_h) * s],
-                   fill=LINE_COLOR, width=LINE_WIDTH * s)
-
-            # Base — horizontal line with rounded ends
-            base_y = cap_bot + stand_h
-            base_left = mic_cx - base_w // 2
-            base_right = mic_cx + base_w // 2
-            draw_line(d, base_left, base_y, base_right, base_y)
-
-            # Cradle arc — U-shape connecting capsule bottom to stand
-            cradle_r = mic_w // 2 + 8
-            draw_arc_eye(d, mic_cx, cap_bot - 5, cradle_r, 0, 180)
-
-            # Sound waves — arcs on left and right sides, rippling inward
-            wave_cx_left = mic_cx - 65    # Wave origin left
-            wave_cx_right = mic_cx + 65   # Wave origin right
-            wave_cy = mic_cy
-
+            # Sound waves — outer side of each mic, rippling inward
             for idx in vis:
                 r = wave_radii[idx]
-                # Left side: )) facing right
-                draw_arc_eye(d, wave_cx_left, wave_cy, r, 315, 45)
-                # Right side: (( facing left
-                draw_arc_eye(d, wave_cx_right, wave_cy, r, 135, 225)
+                # Left mic: waves come from the left )))
+                draw_arc_eye(d, LEFT_EYE_X - 75, mic_cy, r, 315, 45)
+                # Right mic: waves come from the right (((
+                draw_arc_eye(d, RIGHT_EYE_X + 75, mic_cy, r, 135, 225)
 
         create_face(f"{base_dir}/listening_{i+1:02d}.png", draw_listen)
 

@@ -528,6 +528,8 @@ class Brain:
             llm = _get_llm()
             prompt = _prepare_prompt(self.history)
             logger.info("Stream request to Hailo LLM (direct NPU)")
+            stream_start = time.time()
+            first_token_logged = False
 
             with llm.generate(prompt=prompt, temperature=0.4, max_generated_tokens=100) as gen:
                 for token in gen:
@@ -539,6 +541,11 @@ class Brain:
                         token = token.replace(tok, "")
                     if not token:
                         continue
+
+                    if not first_token_logged:
+                        ttft = time.time() - stream_start
+                        bmo_print("LLM", f"TTFT: {ttft:.2f}s")
+                        first_token_logged = True
 
                     # Replace smart quotes
                     token = token.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
@@ -655,11 +662,15 @@ class Brain:
         except Exception as e:
             logger.error(f"VLM Exception: {e}", exc_info=True)
             return "I tried to look, but my eyes aren't working right now."
-        finally:
-            # Reload LLM + STT + re-cache system prompt so inference is ready again
-            global _system_context
-            logger.info("Reloading LLM + STT after VLM subprocess ...")
-            _system_context = None
-            init_llm()
-            from .stt import init_stt
-            init_stt()
+
+
+def reload_after_vlm():
+    """Reload LLM + STT after VLM subprocess. Can be called in a background thread
+    so TTS can speak the VLM response while models reload."""
+    global _system_context
+    logger.info("Reloading LLM + STT after VLM subprocess ...")
+    _system_context = None
+    init_llm()
+    from .stt import init_stt
+    init_stt()
+    logger.info("LLM + STT reload complete")

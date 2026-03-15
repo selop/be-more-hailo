@@ -94,9 +94,12 @@ Before starting any tier, verify:
 - ❌ Sound effects stay on `aplay` subprocess — sharing the persistent AudioPlayer stream between TTS and sound effects causes ALSA assertion crashes and audio stuttering. `aplay` is reliable for fire-and-forget sound effects and isn't on the latency-critical path.
 - ✅ Wake word suppression during SPEAKING/JAMMING states (prevents BMO's own audio from triggering false detections)
 
-#### Phase 3D — generation_id + TTS interruption (next)
-- Add `generation_id` for TTS interruption support — user says wake word while BMO is speaking, BMO stops and listens
-- Standalone change: check generation_id before each sentence plays, `stop_playback()` on interrupt. No queue architecture needed.
+#### Phase 3D — Mid-speech wake word interruption — DROPPED
+Implemented and reverted. A background wake word listener thread ran during LLM streaming + TTS to detect the wake word mid-speech. Issues:
+- The background thread held an ALSA InputStream concurrently with the main wake word listener, causing `PaErrorCode -9985` (device unavailable) when the main loop tried to reclaim the mic
+- BMO's own TTS output triggered false wake word detections, causing responses to be skipped
+- The 0.5-1s latency between detection and playback stop wasn't snappy enough to feel responsive
+- Would require a dedicated always-on mic stream (separate from recording) to work properly, which is a deeper architectural change
 
 #### Phase 3B — webrtcvad for endpoint detection — DROPPED
 Chunk-based silence detection (`silent_chunks > 40`, ~430ms at default blocksize) works well enough for BMO's turn-based interaction. Time-based detection was tested and reverted — background noise kept resetting the silence timer, causing runaway recordings. `webrtcvad` would be a more principled approach but the current solution is reliable and simple. Not worth the risk of destabilising the recording state machine.
