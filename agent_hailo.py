@@ -368,6 +368,12 @@ class BotGUI:
                     # Feed to model.
                     # Assuming model name is 'wakeword' if you only loaded that one onnx file
                     # but openwakeword usually keys predictions by model name.
+                    # Suppress wake word detection while BMO is speaking or
+                    # playing music — the mic picks up BMO's own audio output
+                    if self.current_state in (BotStates.SPEAKING, BotStates.JAMMING):
+                        oww.reset()
+                        continue
+
                     oww.predict(audio_16k)
 
                     # Dynamically find the score so we don't crash on key error
@@ -392,7 +398,7 @@ class BotGUI:
         silent_chunks = 0
         has_spoken = False
 
-        def callback(indata, frames_count, time, status):
+        def callback(indata, frames_count, time_info, status):
             nonlocal silent_chunks, has_spoken
             vol = np.linalg.norm(indata) * 10
             self.meter.feed(vol)
@@ -409,14 +415,14 @@ class BotGUI:
                 while not self.stop_event.is_set():
                     sd.sleep(50)
                     elapsed = time.time() - record_start
-                    # Grace period: give user at least 1.5s to start speaking after wake word
+                    # Grace period: give user at least 1.5s to start speaking
                     if elapsed < 1.5:
                         continue
                     if not has_spoken and silent_chunks > 100:
                         break
                     if has_spoken and silent_chunks > 40:
                         break
-                    if len(frames) > (MIC_SAMPLE_RATE * 10 / 512): # Max 10 seconds approx
+                    if elapsed > 30.0:
                         break
         except Exception as e:
             bmo_print("STT", f"Recording Error: {e}")
@@ -526,7 +532,7 @@ class BotGUI:
         frames = []
         silent_chunks = 0
         has_spoken = False
-        max_vol_seen = 0.0                        
+        max_vol_seen = 0.0
         ignore_until = time.time() + 1.0          # ignore first 1s to let BMO's own TTS echo die down
         deadline = time.time() + timeout_sec       # give up if no speech by here
         max_deadline = time.time() + timeout_sec + 8  # hard cap regardless
@@ -597,27 +603,38 @@ class BotGUI:
     # --- MAIN LOOP ---
     def main_loop(self):
         time.sleep(1) # Let UI settle
+        boot_start = time.time()
 
         # Initialize persistent audio subsystem (TTS player + Piper synthesizer)
         self.set_state(BotStates.WARMUP, "Loading Voice...")
+        t0 = time.time()
         init_audio(ALSA_DEVICE)
         atexit.register(shutdown_audio)
+        bmo_print("BOOT", f"Audio subsystem: {time.time()-t0:.2f}s")
 
         # Initialize LLM + STT on the Hailo NPU (direct Python API)
         self.set_state(BotStates.WARMUP, "Loading Brain...")
+        t0 = time.time()
         init_llm()
+        bmo_print("BOOT", f"LLM (NPU): {time.time()-t0:.2f}s")
+
         self.set_state(BotStates.WARMUP, "Loading Ear (NPU)...")
+        t0 = time.time()
         init_stt()
+        bmo_print("BOOT", f"STT (NPU): {time.time()-t0:.2f}s")
 
         # Load Wake Word
-        self.set_state(BotStates.WARMUP, "Loading Ear...")
+        self.set_state(BotStates.WARMUP, "Loading Wake Word...")
+        t0 = time.time()
         try:
             oww = Model(wakeword_model_paths=[WAKE_WORD_MODEL])
         except Exception as e:
             bmo_print("WAKE", f"Failed to load model: {e}")
             self.set_state(BotStates.ERROR, "Wake Word Error")
             return
+        bmo_print("BOOT", f"Wake word (OWW): {time.time()-t0:.2f}s")
 
+        bmo_print("BOOT", f"Total startup: {time.time()-boot_start:.2f}s")
         self.set_state(BotStates.SPEAKING, "Ready!")
         greeting_proc = self.play_sound("greeting_sounds")
         if greeting_proc:
