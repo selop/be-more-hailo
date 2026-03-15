@@ -313,8 +313,9 @@ if __name__ == "__main__":
         cert_file = cert_files[0]
         key_file = key_files[0]
         logger.info(f"Found SSL certificates ({cert_file}). Starting securely on HTTPS...")
-        uvicorn.run("web_app:app", host="0.0.0.0", port=8080, ssl_certfile=cert_file, ssl_keyfile=key_file, workers=2)
+        # workers=1: NPU VDevice can only be held by one process
+        uvicorn.run("web_app:app", host="0.0.0.0", port=8080, ssl_certfile=cert_file, ssl_keyfile=key_file, workers=1)
     else:
         logger.info("No SSL certificates found. Starting on HTTP...")
-        # Run on all interfaces (0.0.0.0) so it can be accessed from other machines on the network
-        uvicorn.run("web_app:app", host="0.0.0.0", port=8080, workers=2)
+        # workers=1: NPU VDevice can only be held by one process
+        uvicorn.run("web_app:app", host="0.0.0.0", port=8080, workers=1)
