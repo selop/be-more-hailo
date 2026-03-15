@@ -33,10 +33,10 @@ import scipy.signal
 from openwakeword.model import Model
 
 # Import unified core modules
-from core.llm import Brain
-from core.tts import play_audio_on_hardware
-from core.stt import transcribe_audio
-from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE
+from core.llm import Brain, init_llm, is_llm_ready, _get_llm
+from core.tts import play_audio_on_hardware, init_audio, shutdown_audio, get_player, get_synthesizer, clean_text_for_speech
+from core.stt import transcribe_audio, init_stt
+from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, SILENCE_THRESHOLD, t
 from core.meter import MicMeter
 from core.bubble import ThoughtBubble
 from core.log import bmo_print, setup_logging
@@ -86,8 +86,8 @@ class BotStates:
 
 class BotGUI:
 
-    BG_WIDTH, BG_HEIGHT = 800, 480 
-    OVERLAY_WIDTH, OVERLAY_HEIGHT = 400, 300 
+    BG_WIDTH, BG_HEIGHT = 800, 480
+    OVERLAY_WIDTH, OVERLAY_HEIGHT = 400, 300
 
     def __init__(self, master):
         self.master = master
@@ -101,20 +101,24 @@ class BotGUI:
         self.stop_event = threading.Event()
         self.thinking_sound_active = threading.Event()
         self.tts_active = threading.Event()
+        self._interrupted = threading.Event()  # Set when wake word fires during speech
         self.current_state = BotStates.WARMUP
         self.last_state_change = time.time()
         
         # Audio State
         self.current_audio_process = None
         self.tts_queue = []
-        
+
         # Memory
         self.brain = Brain()
 
         # Init UI
         self.background_label = tk.Label(master, bg='black')
         self.background_label.place(x=0, y=0, width=self.BG_WIDTH, height=self.BG_HEIGHT)
-        
+
+        # Mic gain meter (extracted to core/meter.py)
+        self.meter = MicMeter(master)
+
         # BMO-themed captions: dark green text on translucent lime-green background
         self.status_label = tk.Label(
             master,
@@ -127,6 +131,9 @@ class BotGUI:
             highlightthickness=0
         )
         self.status_label.place(relx=0.5, rely=0.92, anchor=tk.S)
+
+        # Thought bubble overlay for transcribed user input
+        self.bubble = ThoughtBubble(master)
 
         self.is_muted = False
         self.mute_label = tk.Label(
@@ -153,6 +160,10 @@ class BotGUI:
         self.last_screensaver_audio_time = time.time()
         threading.Thread(target=self.screensaver_audio_loop, daemon=True).start()
 
+    def show_user_prompt(self, text):
+        """Show transcribed text as an animated thought bubble, auto-hide after 8s."""
+        self.bubble.show(text)
+
     def exit_fullscreen(self, event=None):
         self.stop_event.set()
         self.master.quit()
@@ -176,12 +187,16 @@ class BotGUI:
         self.is_muted = not self.is_muted
         if self.is_muted:
             self.mute_label.place(relx=0.95, rely=0.05, anchor=tk.NE)
+            # Stop persistent TTS player immediately
+            player = get_player()
+            if player:
+                player.stop_playback()
+                bmo_print("MUTE", "Stopped persistent audio player.")
             try:
-                # Kill any hardware audio playing via aplay immediately
+                # Kill any sound effects playing via aplay
                 subprocess.run(["killall", "-9", "aplay"], capture_output=True)
-                bmo_print("MUTE", "Killed aplay process.")
-            except Exception as e:
-                bmo_print("MUTE", f"Error stopping aplay: {e}")
+            except Exception:
+                pass
                 
             old_state = self.current_state
             self.set_state(BotStates.SHHH, "Muted")
@@ -213,12 +228,17 @@ class BotGUI:
             "greeting_sounds": [],
             "ack_sounds": [],
             "thinking_sounds": [],
+            "analyzing_sounds": [],
             "camera_sounds": [],
             "music": []
         }
         base = "sounds"
+        lang_suffix = f"_{LANGUAGE}" if LANGUAGE != "en" else ""
         for category in self.sounds.keys():
-            path = os.path.join(base, category)
+            # Try language-specific directory first (e.g. greeting_sounds_de), fall back to default
+            path = os.path.join(base, category + lang_suffix)
+            if not os.path.exists(path):
+                path = os.path.join(base, category)
             if os.path.exists(path):
                 self.sounds[category] = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith('.wav')]
 
@@ -229,6 +249,7 @@ class BotGUI:
         if not sounds:
             return None
         sound_file = random.choice(sounds)
+        bmo_print("AUDIO", f"Playing {category}: {os.path.basename(sound_file)}")
         try:
             return subprocess.Popen(['aplay', '-D', ALSA_DEVICE, '-q', sound_file])
         except Exception as e:
@@ -294,10 +315,11 @@ class BotGUI:
         if self.current_state == BotStates.LISTENING and self.current_frame > 0 and 'screensaver' in str(self.animations.get(self.current_state, [])):
             self.current_frame = 0 # reset cleanly
 
-        # Hide text status label during screensaver
+        # Hide text labels during screensaver
         if self.current_state == BotStates.SCREENSAVER:
             if self.status_label.winfo_ismapped():
                 self.status_label.place_forget()
+            self.bubble.hide()
         else:
             if not self.status_label.winfo_ismapped():
                 self.status_label.place(relx=0.5, rely=0.92, anchor=tk.S)
@@ -322,7 +344,7 @@ class BotGUI:
         elif self.current_state == BotStates.THINKING:
             speed = 500
         elif self.current_state == BotStates.LISTENING:
-            speed = 400
+            speed = 250
         elif self.current_state == BotStates.CAPTURING:
             speed = 150  # 8 frames × 150ms = 1.2s per shutter cycle
         elif self.current_state == BotStates.SCREENSAVER or self.current_state == BotStates.SHHH:
@@ -332,40 +354,50 @@ class BotGUI:
 
     # --- AUDIO INPUT ---
     def wait_for_wakeword(self, oww):
-        """Block until wake word is heard."""
+        """Block until wake word is heard. Also monitors during SPEAKING state
+        to support mid-speech interruption."""
         CHUNK = 1280
-        # If openwakeword expects 16k, we must capture higher and downsample if needed
-        # But let's try capturing at 16k directly first if the HW supports it, 
-        # otherwise capture 48k and decimate.
-        
-        capture_rate = MIC_SAMPLE_RATE # 48000
+        capture_rate = MIC_SAMPLE_RATE
         target_rate = 16000
         downsample_factor = capture_rate // target_rate
-        
+
         try:
             with sd.InputStream(samplerate=capture_rate, device=MIC_DEVICE_INDEX, channels=1, dtype='int16') as stream:
                 while not self.stop_event.is_set():
+                    # If interrupted during speech, the main loop already knows —
+                    # return immediately so it can start recording
+                    if self._interrupted.is_set():
+                        return True
+
                     data, _ = stream.read(CHUNK * downsample_factor)
-                    # Simple integer decimation for 48k -> 16k
-                    audio_16k = data[::downsample_factor].flatten() 
-                    
-                    # Feed to model. 
-                    # Assuming model name is 'wakeword' if you only loaded that one onnx file
-                    # but openwakeword usually keys predictions by model name.
+                    audio_16k = data[::downsample_factor].flatten()
+
+                    # Suppress during music and recording (mic is in use)
+                    if self.current_state in (BotStates.JAMMING, BotStates.LISTENING):
+                        oww.reset()
+                        continue
+
                     oww.predict(audio_16k)
-                    
-                    # Dynamically find the score so we don't crash on key error
+
                     for key in oww.prediction_buffer.keys():
                         if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
-                            bmo_print("WAKE", f"Detected: {key}")
+                            # If BMO is speaking, interrupt playback and signal the stream loop
+                            if self.current_state == BotStates.SPEAKING:
+                                bmo_print("WAKE", f"Detected during speech — interrupting!")
+                                self._interrupted.set()
+                                player = get_player()
+                                if player:
+                                    player.stop_playback()
+                            else:
+                                bmo_print("WAKE", f"Detected: {key}")
                             oww.reset()
                             return True
         except Exception as e:
             bmo_print("AUDIO", f"Input Error: {e}")
             self.set_state(BotStates.ERROR)
-            time.sleep(2) # Prevent rapid looping on error
+            time.sleep(2)
             return False
-            
+
         return False
 
     def record_audio(self):
@@ -376,35 +408,36 @@ class BotGUI:
         silent_chunks = 0
         has_spoken = False
 
-        def callback(indata, frames_count, time, status):
+        def callback(indata, frames_count, time_info, status):
             nonlocal silent_chunks, has_spoken
-            vol = np.linalg.norm(indata) * 10 
+            vol = np.linalg.norm(indata) * 10
+            self.meter.feed(vol)
             frames.append(indata.copy())
-            if vol < 50000: # Silence threshold
+            if vol < SILENCE_THRESHOLD:
                 silent_chunks += 1
             else:
                 silent_chunks = 0
                 has_spoken = True
-            
+
         try:
             record_start = time.time()
             with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16', callback=callback):
                 while not self.stop_event.is_set():
                     sd.sleep(50)
                     elapsed = time.time() - record_start
-                    # Grace period: give user at least 1.5s to start speaking after wake word
+                    # Grace period: give user at least 1.5s to start speaking
                     if elapsed < 1.5:
                         continue
                     if not has_spoken and silent_chunks > 100:
                         break
                     if has_spoken and silent_chunks > 40:
                         break
-                    if len(frames) > (MIC_SAMPLE_RATE * 10 / 512): # Max 10 seconds approx
+                    if elapsed > 30.0:
                         break
         except Exception as e:
             bmo_print("STT", f"Recording Error: {e}")
             return None
-        
+
         # Save file
         if not frames:
             return None
@@ -447,25 +480,27 @@ class BotGUI:
         bmo_print("STT", "Transcribing...")
         return transcribe_audio(filename)
 
-    def speak(self, text, msg="Speaking..."):
-        from core.tts import clean_text_for_speech
-        from core.config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE
-        
+    def speak(self, text, msg="Speaking...", interruptible=True):
         clean_text = clean_text_for_speech(text)
         if not clean_text or not any(c.isalnum() for c in clean_text):
             return
-            
+
+        # Skip if interrupted (wake word fired during previous sentence)
+        if interruptible and self._interrupted.is_set():
+            bmo_print("TTS", f"Skipped (interrupted): {clean_text[:30]}...")
+            return
+
         bmo_print("TTS", f"Speaking: {clean_text[:30]}...")
         try:
-            safe_text = clean_text.replace("'", "'\\''")
-            
+            synth = get_synthesizer()
+            player = get_player()
+
             # 1. Synthesize audio first. (Runs silently, mouth stays idle/thinking)
-            piper_cmd = f"echo '{safe_text}' | {PIPER_CMD} --model {PIPER_MODEL} --output_raw"
-            res = subprocess.run(piper_cmd, shell=True, capture_output=True)
-            if res.returncode != 0:
-                bmo_print("TTS", f"Piper error: {res.stderr}")
+            pcm = synth.synthesize(clean_text)
+            if not pcm:
+                bmo_print("TTS", "Piper returned no audio")
                 return
-            
+
             # 2. Audio is ready! Set SPEAKING state so mouth starts moving.
             if msg is not None:
                 self.set_state(BotStates.SPEAKING, msg)
@@ -473,15 +508,15 @@ class BotGUI:
                 self.current_state = BotStates.SPEAKING
                 self.current_frame = 0
                 self.last_state_change = time.time()
-            
-            # 3. Play the generated audio bytes
+
+            # 3. Play through persistent stream
             if not self.is_muted:
-                aplay_cmd = ["aplay", "-D", ALSA_DEVICE, "-r", "22050", "-f", "S16_LE", "-t", "raw"]
-                subprocess.run(aplay_cmd, input=res.stdout)
+                player.resume()
+                player.play(pcm)
             else:
                 # If muted, just hold the speaking pose for a moment to simulate talking
                 time.sleep(1.5)
-            
+
             # 4. Enforce an immediate IDLE state and a short visual breath pause
             # This ensures the mouth closes definitively before the next sentence chunk arrives,
             # unless a background thread (like play_music) has already hijacked the state to JAMMING
@@ -493,7 +528,7 @@ class BotGUI:
                     self.current_frame = 0
                     self.last_state_change = time.time()
                 time.sleep(0.3)
-            
+
         except Exception as e:
             bmo_print("TTS", f"Hardware error: {e}")
 
@@ -512,8 +547,8 @@ class BotGUI:
         frames = []
         silent_chunks = 0
         has_spoken = False
-        max_vol_seen = 0.0                        
-        ignore_until = time.time() + 0.2          # ignore first 0.2s for ALSA buffer clear
+        max_vol_seen = 0.0
+        ignore_until = time.time() + 1.0          # ignore first 1s to let BMO's own TTS echo die down
         deadline = time.time() + timeout_sec       # give up if no speech by here
         max_deadline = time.time() + timeout_sec + 8  # hard cap regardless
 
@@ -522,10 +557,11 @@ class BotGUI:
             if time.time() < ignore_until:
                 return  # still in echo dead-zone — ignore all audio
             vol = np.linalg.norm(indata) * 10
+            self.meter.feed(vol)
             max_vol_seen = max(max_vol_seen, vol)
-            
+
             frames.append(indata.copy())
-            if vol < 50000:  # Matching main record_audio silence threshold
+            if vol < SILENCE_THRESHOLD:
                 silent_chunks += 1
             else:
                 silent_chunks = 0
@@ -542,7 +578,7 @@ class BotGUI:
                         break
                     # No speech in the listen window — give up quietly
                     if now > deadline and not has_spoken:
-                        bmo_print("FOLLOW-UP", f"Timeout. Max mic volume: {max_vol_seen:.2f} (threshold 50000)")
+                        bmo_print("FOLLOW-UP", f"Timeout. Max mic volume: {max_vol_seen:.2f} (threshold {SILENCE_THRESHOLD})")
                         return None
                     # Hard cap — break out and attempt transcription rather than discarding!
                     if now > max_deadline:
@@ -584,8 +620,26 @@ class BotGUI:
         time.sleep(1) # Let UI settle
         boot_start = time.time()
 
+        # Initialize persistent audio subsystem (TTS player + Piper synthesizer)
+        self.set_state(BotStates.WARMUP, "Loading Voice...")
+        t0 = time.time()
+        init_audio(ALSA_DEVICE)
+        atexit.register(shutdown_audio)
+        bmo_print("BOOT", f"Audio subsystem: {time.time()-t0:.2f}s")
+
+        # Initialize LLM + STT on the Hailo NPU (direct Python API)
+        self.set_state(BotStates.WARMUP, "Loading Brain...")
+        t0 = time.time()
+        init_llm()
+        bmo_print("BOOT", f"LLM (NPU): {time.time()-t0:.2f}s")
+
+        self.set_state(BotStates.WARMUP, "Loading Ear (NPU)...")
+        t0 = time.time()
+        init_stt()
+        bmo_print("BOOT", f"STT (NPU): {time.time()-t0:.2f}s")
+
         # Load Wake Word
-        self.set_state(BotStates.WARMUP, "Loading Ear...")
+        self.set_state(BotStates.WARMUP, "Loading Wake Word...")
         t0 = time.time()
         try:
             oww = Model(wakeword_model_paths=[WAKE_WORD_MODEL])
@@ -607,6 +661,7 @@ class BotGUI:
         while not self.stop_event.is_set():
             # 1. Wait for Wake Word
             if self.wait_for_wakeword(oww):
+                self._interrupted.clear()
                 # 2. Record
                 self.set_state(BotStates.LISTENING, "Listening...")
                 wav_file = self.record_audio()
@@ -656,15 +711,50 @@ class BotGUI:
                         pass
                     self.thinking_audio_process = None
 
+                # Start background wake word listener for mid-speech interruption
+                _ww_stop = threading.Event()
+                def _background_wakeword():
+                    """Listen for wake word during LLM streaming + TTS.
+                    Sets _interrupted and stops playback if detected."""
+                    CHUNK = 1280
+                    ds = MIC_SAMPLE_RATE // 16000
+                    try:
+                        with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX,
+                                            channels=1, dtype='int16') as stream:
+                            while not _ww_stop.is_set() and not self.stop_event.is_set():
+                                data, _ = stream.read(CHUNK * ds)
+                                if self.current_state != BotStates.SPEAKING:
+                                    oww.reset()
+                                    continue
+                                audio_16k = data[::ds].flatten()
+                                oww.predict(audio_16k)
+                                for key in oww.prediction_buffer.keys():
+                                    if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
+                                        bmo_print("WAKE", "Detected during speech — interrupting!")
+                                        self._interrupted.set()
+                                        p = get_player()
+                                        if p:
+                                            p.stop_playback()
+                                        oww.reset()
+                                        return
+                    except Exception:
+                        pass
+                ww_thread = threading.Thread(target=_background_wakeword, daemon=True)
+                ww_thread.start()
+
                 try:
                     full_response = ""
                     image_url = None
                     taking_photo = False
-                    
+                    music_triggered = False
+
                     for chunk in self.brain.stream_think(user_text):
+                        if self._interrupted.is_set():
+                            bmo_print("AGENT", "Speech interrupted by wake word — breaking stream")
+                            break
                         if not chunk.strip():
                             continue
-                            
+
                         full_response += chunk
                         bmo_print("AGENT", f"Chunk received: '{chunk[:80]}'")
                         
@@ -697,6 +787,7 @@ class BotGUI:
                                     self.start_timer_thread(mins, msg)
                                     chunk = chunk.replace(json_match.group(0), '').strip()
                                 elif action_data.get("action") == "play_music":
+                                    music_triggered = True
                                     # Spawns a background thread to play music and animate
                                     def music_worker():
                                         # Wait for current speaking to finish
@@ -704,14 +795,7 @@ class BotGUI:
                                             time.sleep(0.5)
                                         
                                         # Say something fun before playing
-                                        intros = [
-                                            "Oh yeah! BMO is going to jam out!",
-                                            "Time for music! La la la!",
-                                            "BMO loves this song!",
-                                            "Let BMO play you a tune!",
-                                            "Music time! BMO is so excited!",
-                                        ]
-                                        self.speak(random.choice(intros), msg="Getting ready to jam...")
+                                        self.speak(random.choice(t("music_intros")), msg="Getting ready to jam...")
                                         
                                         bmo_print("MUSIC", "Starting music playback...")
                                         music_proc = self.play_sound("music")
@@ -726,7 +810,7 @@ class BotGUI:
                                                 self.set_state(BotStates.IDLE, "Ready")
                                         else:
                                             bmo_print("MUSIC", "No music files found or muted!")
-                                            self.speak("BMO wants to play music, but there are no songs loaded!")
+                                            self.speak(t("no_music"))
                                     
                                     threading.Thread(target=music_worker, daemon=True).start()
                                     chunk = chunk.replace(json_match.group(0), '').strip()
@@ -737,27 +821,26 @@ class BotGUI:
                             self.speak(chunk)
 
                     if taking_photo:
+                        # Kill any thinking audio from the STT phase before camera UX
+                        if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
+                            try:
+                                self.thinking_audio_process.terminate()
+                            except Exception:
+                                pass
+                            self.thinking_audio_process = None
+                        # Clear transcription bubble so it doesn't clip the camera face
+                        self.bubble.hide()
                         # --- Camera UX: animated face + spoken intro + shutter ---
-                        camera_intros = [
-                            "BMO is activating camera mode!",
-                            "Loading photo module, please wait a sec!",
-                            "Say cheese! BMO is going to take a picture!",
-                            "Photo time! Hold still for BMO!",
-                            "BMO's camera is warming up!",
-                            "Ooh, let BMO see what's out there!",
-                            "Smile! BMO is about to snap a photo!",
-                        ]
-                        self.set_state(BotStates.CAPTURING, "Camera mode!")
-                        self.speak(random.choice(camera_intros))
+                        self.speak(random.choice(t("camera_intros")))
                         self.set_state(BotStates.CAPTURING, "Say cheese!")
-                        time.sleep(0.5)
+                        time.sleep(2)
                         self.play_sound("camera_sounds")
                         try:
                             # Try libcamera-still (older) or rpicam-still (newer Pi OS)
                             cam_cmd = None
+                            import shutil
                             for candidate in ['libcamera-still', 'rpicam-still']:
-                                r = subprocess.run(['which', candidate], capture_output=True)
-                                if r.returncode == 0:
+                                if shutil.which(candidate):
                                     cam_cmd = candidate
                                     break
                             if cam_cmd is None:
@@ -767,7 +850,22 @@ class BotGUI:
                             with open('temp.jpg', 'rb') as img_file:
                                 b64_string = base64.b64encode(img_file.read()).decode('utf-8')
                             self.set_state(BotStates.THINKING, "Analyzing...")
-                            threading.Thread(target=play_thinking_sequence, daemon=True).start()
+
+                            def play_analyzing_sequence():
+                                # Play one analyzing intro, then loop thinking sounds as filler
+                                proc = self.play_sound("analyzing_sounds")
+                                if proc:
+                                    proc.wait()
+                                while self.current_state == BotStates.THINKING:
+                                    self.thinking_audio_process = self.play_sound("thinking_sounds")
+                                    if self.thinking_audio_process:
+                                        self.thinking_audio_process.wait()
+                                    for _ in range(80):
+                                        if self.current_state != BotStates.THINKING:
+                                            break
+                                        time.sleep(0.1)
+
+                            threading.Thread(target=play_analyzing_sequence, daemon=True).start()
                             response = self.brain.analyze_image(b64_string, user_text)
                             if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
                                 try:
@@ -778,16 +876,16 @@ class BotGUI:
                             self.speak(response)
                         except FileNotFoundError as e:
                             bmo_print("CAMERA", f"Error: {e}")
-                            self.speak("Hmm, BMO doesn't seem to have a camera connected right now. I can't take a photo!")
+                            self.speak(t("no_camera"))
 
                         except Exception as e:
                             bmo_print("CAMERA", f"Error: {e}")
-                            self.speak("I tried to take a photo, but my camera isn't working.")
+                            self.speak(t("camera_error"))
                     
                     # 5. Display Image (if any)
                     if image_url:
                         # Speak confirmation before downloading
-                        self.speak("Ooh, let BMO draw something for you!")
+                        self.speak(t("draw_image"))
                         self.set_state(BotStates.DISPLAY_IMAGE, "Showing Image...")
                         bmo_print("IMAGE", f"Starting image display for: {image_url}")
                         try:
@@ -849,6 +947,15 @@ class BotGUI:
                 except Exception as e:
                     bmo_print("ERROR", f"LLM/TTS pipeline: {e}")
                     traceback.print_exc()
+                finally:
+                    # Stop background wake word listener
+                    _ww_stop.set()
+
+                # If interrupted, skip idle — go straight to next wake word cycle
+                # which will immediately return True (flag is already set)
+                if self._interrupted.is_set():
+                    bmo_print("AGENT", "Interrupted — ready for next input")
+                    continue
 
                 self.set_state(BotStates.IDLE, "Ready")
 
@@ -856,6 +963,10 @@ class BotGUI:
                 # pick up BMO's own intro speech and the music itself as false input.
                 if music_triggered:
                     bmo_print("FOLLOW-UP", "Skipped — music playback active")
+                    continue
+
+                if not FOLLOWUP_ENABLED:
+                    bmo_print("FOLLOW-UP", "Disabled via config")
                     continue
 
                 # Conversation follow-up: let user reply repeatedly as long as they respond within 8 seconds
@@ -910,9 +1021,7 @@ class BotGUI:
 
     def screensaver_audio_loop(self):
         import datetime
-        import requests as http_requests
         from core.search import search_web
-        from core.config import LLM_URL, FAST_LLM_MODEL
         
         # Topics BMO might wonder about — used as web search seeds
         search_topics = [
@@ -941,17 +1050,8 @@ class BotGUI:
             "Football... is a tough little guy.",
         ]
         
-        def is_llm_reachable():
-            """Quick health check — ping the Ollama base URL before making a full LLM call."""
-            try:
-                base_url = LLM_URL.replace("/api/chat", "")
-                r = http_requests.get(base_url, timeout=5)
-                return r.status_code == 200
-            except Exception:
-                return False
-        
         def generate_thought(search_result):
-            """Generate a BMO musing using a direct (non-streaming) LLM call.
+            """Generate a BMO musing using the direct NPU LLM API.
             Returns the thought string, or None on failure."""
             thought_prompt = (
                 "You are BMO, a cute little robot. You just learned something interesting from the real world. "
@@ -973,28 +1073,21 @@ class BotGUI:
                 "Do NOT use JSON unless you are creating an image.\n\n"
                 f"Info: {search_result[:1200]}"
             )
-            payload = {
-                "model": FAST_LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts."},
-                    {"role": "user", "content": thought_prompt},
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": 0.8,
-                    "num_predict": 300,
-                }
-            }
+            messages = [
+                {"role": "system", "content": "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts."},
+                {"role": "user", "content": thought_prompt},
+            ]
             try:
-                resp = http_requests.post(LLM_URL, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    content = resp.json().get("message", {}).get("content", "").strip()
-                    # Filter out error-like responses the model might echo
-                    if content and "connect" not in content.lower() and "error" not in content.lower():
-                        return content
-                else:
-                    bmo_print("SCREENSAVER", f"LLM returned status {resp.status_code}")
-            except http_requests.exceptions.RequestException as e:
+                llm = _get_llm()
+                content = llm.generate_all(prompt=messages, temperature=0.8, max_generated_tokens=300)
+                # Strip stop tokens
+                for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+                    content = content.replace(tok, "")
+                content = content.strip()
+                # Filter out error-like responses the model might echo
+                if content and "connect" not in content.lower() and "error" not in content.lower():
+                    return content
+            except Exception as e:
                 bmo_print("SCREENSAVER", f"LLM request failed: {e}")
             return None
         
@@ -1034,7 +1127,7 @@ class BotGUI:
                 if not self.is_muted and os.path.exists(sound_file):
                     try:
                         subprocess.Popen(['aplay', '-D', ALSA_DEVICE, '-q', sound_file])
-                    except Exception as e:
+                    except Exception:
                         pass
                 
                 # Hold the persona animation for 8 seconds
@@ -1056,7 +1149,7 @@ class BotGUI:
                     phrase = None
                     
                     # Check if LLM server is even reachable before trying
-                    if is_llm_reachable():
+                    if is_llm_ready():
                         try:
                             topic = random.choice(search_topics)
                             bmo_print("SCREENSAVER", f"Searching for: {topic}")

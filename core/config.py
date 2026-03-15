@@ -6,13 +6,12 @@ load_dotenv()
 
 # Shared Configuration for BMO
 
-# LLM Settings
-# To offload to your Linux server, change this to: "http://blackbox.clevercode.ts.net:11434/api/chat"
-# Make sure Ollama is running on the blackbox server and listening on 0.0.0.0
-LLM_URL = "http://127.0.0.1:8000/api/chat"
-LLM_MODEL = "qwen2.5-instruct:1.5b" # Native Hailo model for all queries
-FAST_LLM_MODEL = "qwen2.5-instruct:1.5b" # Unify models to prevent NPU swap crashing
-VISION_MODEL = "qwen2-vl-instruct:2b" # Legacy Ollama name (unused — VLM runs via HailoRT directly)
+# Language — switch BMO's voice and LLM output language
+# Supported: "en" (English, default), "de" (German)
+LANGUAGE = os.environ.get("BMO_LANGUAGE", "en")
+
+# LLM HEF — direct NPU inference via hailo_platform.genai.LLM (no hailo-ollama needed)
+LLM_HEF_PATH = os.environ.get("LLM_HEF_PATH", "./models/Qwen2.5-1.5B-Instruct.hef")
 
 # VLM (Vision Language Model) Settings — uses HailoRT Python API directly
 # The HEF file is a precompiled model binary from Hailo's model zoo
@@ -37,7 +36,11 @@ def get_system_prompt():
         "Add a small touch of childlike charm or soft enthusiasm to your responses. "
         "Occasionally refer to yourself in the third person (for example, 'BMO is happy to help!'). "
         "Language Rule: "
-        "You MUST respond ONLY in English at all times. Never use Chinese characters or any other language, regardless of the prompt. "
+        + (
+            "You MUST respond ONLY in German (Deutsch) at all times. Never use Chinese characters or English, regardless of the prompt. "
+            if LANGUAGE == "de" else
+            "You MUST respond ONLY in English at all times. Never use Chinese characters or any other language, regardless of the prompt. "
+        ) +
         "Factual Grounding and Honesty: "
         "Prioritize factual accuracy. Do NOT invent facts or make up information. "
         "If you genuinely do not know something and no search context has been provided, say so politely. "
@@ -74,7 +77,13 @@ SYSTEM_PROMPT = get_system_prompt()
 
 # TTS Settings
 PIPER_CMD = "./piper/piper"
-PIPER_MODEL = "./piper/en_GB-semaine-medium.onnx"
+PIPER_MODELS = {
+    "en": "./piper/en_GB-semaine-medium.onnx",
+    "de": "./piper/de_DE-ramona-low.onnx",
+}
+PIPER_MODEL = PIPER_MODELS.get(LANGUAGE, PIPER_MODELS["en"])
+# Speech rate: >1.0 = slower. German low-quality model speaks too fast at default 1.0
+PIPER_LENGTH_SCALE = {"en": 1.0, "de": 1.4}.get(LANGUAGE, 1.0)
 # ALSA output device for hardware audio playback (aplay -D).
 # The USB combo device (mic+speaker) exposes two ALSA cards:
 #   card 2: UACDemoV10 -> speaker/playback output
@@ -83,12 +92,85 @@ PIPER_MODEL = "./piper/en_GB-semaine-medium.onnx"
 # Run 'aplay -l' to check your device names if this changes.
 ALSA_DEVICE = os.environ.get("ALSA_DEVICE", "plughw:UACDemoV10,0")
 
-# STT Settings (CPU whisper.cpp)
+# STT Settings
+# NPU Speech2Text (preferred — 7x faster than CPU whisper.cpp)
+WHISPER_HEF_PATH = os.environ.get("WHISPER_HEF_PATH", "./models/Whisper-Base.hef")
+# CPU fallback (whisper.cpp subprocess)
 WHISPER_CMD = "./whisper.cpp/build/bin/whisper-cli"
-WHISPER_MODEL = "./models/ggml-base.en.bin"
+WHISPER_MODELS = {
+    "en": "./models/ggml-base.en.bin",
+    "de": "./models/ggml-base.bin",  # Multilingual model for non-English
+}
+WHISPER_MODEL = WHISPER_MODELS.get(LANGUAGE, WHISPER_MODELS["en"])
 
 # Audio Settings
-MIC_DEVICE_INDEX = 1
+MIC_DEVICE_INDEX = int(os.environ.get("MIC_DEVICE_INDEX", "1"))
 MIC_SAMPLE_RATE = 48000
 WAKE_WORD_MODEL = "./wakeword.onnx"
 WAKE_WORD_THRESHOLD = 0.35
+SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
+
+# UI Settings
+MIC_METER_ENABLED = True  # Show mic gain meter overlay during listening
+FOLLOWUP_ENABLED = False  # Keep listening after BMO responds for multi-turn conversation
+
+# Localized strings for hardcoded speech lines
+STRINGS = {
+    "music_intros": {
+        "en": [
+            "Oh yeah! BMO is going to jam out!",
+            "Time for music! La la la!",
+            "BMO loves this song!",
+            "Let BMO play you a tune!",
+            "Music time! BMO is so excited!",
+        ],
+        "de": [
+            "Oh ja! BMO legt jetzt los!",
+            "Zeit fuer Musik! La la la!",
+            "BMO liebt dieses Lied!",
+            "BMO spielt dir was vor!",
+            "Musikzeit! BMO ist so aufgeregt!",
+        ],
+    },
+    "no_music": {
+        "en": "BMO wants to play music, but there are no songs loaded!",
+        "de": "BMO moechte Musik spielen, aber es sind keine Lieder geladen!",
+    },
+    "camera_intros": {
+        "en": [
+            "BMO is activating camera mode!",
+            "Loading photo module, please wait a sec!",
+            "Say cheese! BMO is going to take a picture!",
+            "Photo time! Hold still for BMO!",
+            "BMO's camera is warming up!",
+            "Ooh, let BMO see what's out there!",
+            "Smile! BMO is about to snap a photo!",
+        ],
+        "de": [
+            "BMO aktiviert den Kameramodus!",
+            "Fotomodul wird geladen, einen Moment bitte!",
+            "Sag Cheese! BMO macht ein Foto!",
+            "Fotozeit! Halt still fuer BMO!",
+            "BMOs Kamera waermt sich auf!",
+            "Ooh, lass BMO mal schauen!",
+            "Laecheln! BMO macht gleich ein Bild!",
+        ],
+    },
+    "no_camera": {
+        "en": "Hmm, BMO doesn't seem to have a camera connected right now. I can't take a photo!",
+        "de": "Hmm, BMO hat gerade keine Kamera angeschlossen. Ich kann kein Foto machen!",
+    },
+    "camera_error": {
+        "en": "I tried to take a photo, but my camera isn't working.",
+        "de": "Ich habe versucht ein Foto zu machen, aber meine Kamera funktioniert nicht.",
+    },
+    "draw_image": {
+        "en": "Ooh, let BMO draw something for you!",
+        "de": "Ooh, lass BMO etwas fuer dich zeichnen!",
+    },
+}
+
+def t(key):
+    """Get a localized string. Returns a list or a single string depending on the key."""
+    entry = STRINGS.get(key, {})
+    return entry.get(LANGUAGE, entry.get("en", key))

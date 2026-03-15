@@ -7,17 +7,16 @@ import logging
 import os
 import json
 import uuid
-import requests
 import shutil
 import numpy as np
 import psutil
 import subprocess
 
 # Import our new unified core modules
-from core.llm import Brain
+from core.llm import Brain, init_llm, is_llm_ready
 from core.tts import play_audio_on_hardware, generate_audio_file, add_pronunciation, load_pronunciations, clean_text_for_speech
-from core.stt import transcribe_audio
-from core.config import LLM_URL, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD
+from core.stt import transcribe_audio, init_stt
+from core.config import WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD
 from core.log import setup_logging
 
 # Configure logging
@@ -57,8 +56,10 @@ def _cleanup_old_audio():
         logger.warning(f"Audio cleanup error: {e}")
 
 @app.on_event("startup")
-async def startup_cleanup():
+async def startup_init():
     _cleanup_old_audio()
+    init_llm()
+    init_stt()
 
 # Mount static files (for CSS, JS, images, and audio)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -113,18 +114,12 @@ async def get_debug_info():
         "logs": []
     }
     
-    # Check Hailo/Ollama status
-    try:
-        # Extract base URL from LLM_URL (e.g., http://127.0.0.1:8000)
-        base_url = LLM_URL.split("/api/")[0]
-        response = requests.get(f"{base_url}/api/tags", timeout=2)
-        if response.status_code == 200:
-            info["hailo"]["status"] = "online"
-        else:
-            info["hailo"]["status"] = f"error ({response.status_code})"
-    except Exception as e:
+    # Check Hailo LLM status (direct NPU API — no HTTP server)
+    if is_llm_ready():
+        info["hailo"]["status"] = "online"
+    else:
         info["hailo"]["status"] = "offline"
-        info["hailo"]["error"] = str(e)
+        info["hailo"]["error"] = "LLM not initialised"
         
     # Get recent logs from journalctl
     try:
@@ -271,15 +266,9 @@ async def websocket_wakeword(websocket: WebSocket):
 
 @app.get("/api/status")
 async def get_status():
-    """Check if the Hailo LLM server is reachable."""
-    try:
-        # Check the base Ollama URL (e.g., http://127.0.0.1:8000)
-        base_url = LLM_URL.replace("/api/chat", "")
-        response = requests.get(base_url, timeout=2)
-        if response.status_code == 200:
-            return {"status": "online"}
-    except Exception:
-        pass
+    """Check if the Hailo LLM is ready (direct NPU API)."""
+    if is_llm_ready():
+        return {"status": "online"}
     return {"status": "offline"}
 
 @app.get("/api/faces/{state}")

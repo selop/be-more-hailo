@@ -92,6 +92,13 @@ All configuration lives in `core/config.py`. Key settings:
 
 Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `VLM_HEF_PATH`.
 
+## Deployment
+
+Deploy to Raspberry Pi via rsync. **Always use `--relative`** to preserve subdirectory structure:
+```bash
+rsync -avz --relative core/config.py core/tts.py agent_hailo.py selop@raspi:~/Git/be-more-hailo/
+```
+
 ## Important Conventions
 
 - BMO is genderless — use they/them, never he/she

@@ -1,10 +1,11 @@
 import time
 import sys
-from core.llm import Brain
+from core.llm import Brain, init_llm
 
 def main():
     print("Initializing BMO Brain...")
     try:
+        init_llm()
         brain = Brain()
     except Exception as e:
         print(f"Failed to initialize Brain: {e}")

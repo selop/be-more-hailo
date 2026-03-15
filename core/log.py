@@ -8,6 +8,7 @@ Colors auto-disable when stdout is not a TTY (piped / redirected).
 Honour ``NO_COLOR`` (https://no-color.org/) and ``FORCE_COLOR=1`` env vars.
 """
 
+import datetime
 import logging
 import os
 import sys
@@ -79,15 +80,16 @@ def _color_on() -> bool:
 # ---------------------------------------------------------------------------
 
 def bmo_print(tag: str, msg: str = "") -> None:
-    """Print a tagged log line with optional ANSI colour."""
+    """Print a tagged log line with optional ANSI colour and timestamp."""
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
     if _color_on():
         color = _TAG_COLORS.get(tag, "")
         if color:
-            print(f"{color}[{tag}]{_RESET} {msg}")
+            print(f"{ts} {color}[{tag}]{_RESET} {msg}")
         else:
-            print(f"[{tag}] {msg}")
+            print(f"{ts} [{tag}] {msg}")
     else:
-        print(f"[{tag}] {msg}")
+        print(f"{ts} [{tag}] {msg}")
 
 
 # ---------------------------------------------------------------------------
