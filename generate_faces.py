@@ -417,14 +417,14 @@ def gen_listening(base_dir="faces/listening"):
         os.remove(f)
 
     # Centered microphone with sound waves entering from both sides
-    # Positioned in upper half so VU meter has clear space below
-    mic_cx, mic_cy = 399, 165
-    mic_w, mic_h = 36, 60      # Mic capsule dimensions
-    stand_h = 35                # Stand below capsule
-    base_w = 70                 # Base width
+    # Small mic icon at top — VU meter overlay dominates the center
+    mic_cx, mic_cy = 399, 45
+    mic_w, mic_h = 20, 32      # Small capsule
+    stand_h = 18                # Short stand
+    base_w = 40                 # Narrow base
 
-    # Sound wave arcs on each side — ripple inward toward the mic
-    wave_radii = [90, 65, 42]
+    # Compact sound wave arcs
+    wave_radii = [45, 32, 20]
     # Left waves face right ))  right waves face left ((
     # Each frame shows different wave positions (rippling inward)
     frame_waves = [
@@ -472,8 +472,8 @@ def gen_listening(base_dir="faces/listening"):
             draw_arc_eye(d, mic_cx, cap_bot - 5, cradle_r, 0, 180)
 
             # Sound waves — arcs on left and right sides, rippling inward
-            wave_cx_left = mic_cx - 120   # Wave origin left
-            wave_cx_right = mic_cx + 120  # Wave origin right
+            wave_cx_left = mic_cx - 65    # Wave origin left
+            wave_cx_right = mic_cx + 65   # Wave origin right
             wave_cy = mic_cy
 
             for idx in vis:
