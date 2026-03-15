@@ -369,7 +369,7 @@ class Brain:
             llm = _get_llm()
             prompt = _prepare_prompt(self.history)
             logger.info("Sending request to Hailo LLM (direct NPU)")
-            content = llm.generate_all(prompt=prompt, temperature=0.4, max_generated_tokens=180)
+            content = llm.generate_all(prompt=prompt, temperature=0.4, max_generated_tokens=100)
 
             # Strip stop tokens the model may emit
             for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
@@ -400,7 +400,7 @@ class Brain:
                             {"role": "system", "content": "Summarize this search result in one short, conversational sentence as BMO. Do not use markdown."},
                             {"role": "user", "content": f"RESULT: {search_result}\nUser Question: {user_text}"}
                         ]
-                        content = llm.generate_all(prompt=summary_messages, temperature=0.4, max_generated_tokens=180)
+                        content = llm.generate_all(prompt=summary_messages, temperature=0.4, max_generated_tokens=100)
                         for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
                             content = content.replace(tok, "")
                         content = content.strip()
@@ -521,13 +521,15 @@ class Brain:
 
         full_content = ""
         buffer = ""
+        sentences_yielded = 0
+        MAX_SENTENCES = 4  # Cap to keep BMO concise (system prompt says 2-4)
 
         try:
             llm = _get_llm()
             prompt = _prepare_prompt(self.history)
             logger.info("Stream request to Hailo LLM (direct NPU)")
 
-            with llm.generate(prompt=prompt, temperature=0.4, max_generated_tokens=180) as gen:
+            with llm.generate(prompt=prompt, temperature=0.4, max_generated_tokens=100) as gen:
                 for token in gen:
                     if not token:
                         continue
@@ -552,6 +554,9 @@ class Brain:
                         out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
                         if out_chunk.strip():
                             yield out_chunk
+                            sentences_yielded += 1
+                            if sentences_yielded >= MAX_SENTENCES:
+                                break
                         buffer = ""
 
             # Yield any remaining buffer
