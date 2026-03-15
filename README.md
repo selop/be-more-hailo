@@ -1,34 +1,55 @@
-﻿# Be More Agent — Hailo-10H Edition
+# Be More Agent — Hailo-10H Edition
 
 <p align="center">
   <img src="bmo_irl.jpg" height="300" alt="BMO On-Device" />
   <img src="bmo-web.png" height="300" alt="BMO Web Interface" />
 </p>
 
-A fork of [@brenpoly's be-more-agent](https://github.com/brenpoly/be-more-agent) project, built to run fully on-device on a **Raspberry Pi 5** with the **Raspberry Pi AI HAT 2+** (Hailo-10H). BMO listens for its wake word, understands what you say, thinks about it locally, and talks back — no cloud, no subscriptions, no data leaving your house.
+A fork of [@moorew's be-more-hailo](https://github.com/moorew/be-more-hailo) (itself a fork of [@brenpoly's be-more-agent](https://github.com/brenpoly/be-more-agent)), built to run fully on-device on a **Raspberry Pi 5** with the **Raspberry Pi AI HAT 2+** (Hailo-10H). BMO listens for its wake word, understands what you say, thinks about it locally, and talks back — no cloud, no subscriptions, no data leaving your house.
 
-This fork adds a browser-based **web interface**, a shared `core/` module layer used by both interfaces, and updated support for the Hailo NPU hardware.
+This fork replaces the upstream's HTTP-based inference stack with **direct NPU Python APIs** and squeezes every bit of performance out of the Hailo-10H hardware.
+
+---
+
+## ELI5: What makes this fork different?
+
+The [original project](https://github.com/moorew/be-more-hailo) talks to the Hailo chip through a web server (`hailo-ollama`) — your Pi sends an HTTP request to `localhost:8000`, waits for the full response, then speaks it. That's fine for a demo, but it adds latency at every step and means your Pi is running a separate server process just to forward data to the chip sitting right there on the board.
+
+This fork **rips out the middleman**. Every AI model talks directly to the NPU through Hailo's Python API — no HTTP, no server, no serialization overhead. The result:
+
+| What changed | Before (upstream) | After (this fork) | Improvement |
+|---|---|---|---|
+| **LLM inference** | HTTP request to hailo-ollama | Direct `hailo_platform.genai.LLM` API | **33% faster** first token (0.55s -> 0.37s) |
+| **Speech-to-text** | CPU subprocess (whisper.cpp) | NPU `Speech2Text` API | **7.3x faster** (1.91s -> 0.26s) |
+| **TTS audio** | Spawn `aplay` subprocess per sentence | Persistent `sounddevice` stream | **Zero process overhead** per sentence |
+| **System prompt** | Re-processed every single turn | KV cache saved once at boot | **Processed once**, reused forever |
+| **Response style** | Wait for full response, then speak | Stream token-by-token, speak per sentence | **User hears first sentence in <0.5s** |
+| **Vision (VLM)** | `pkill hailo-ollama`, pray it restarts | Clean subprocess with dedicated VDevice | **No crashes**, clean NPU handoff |
+
+The practical difference: you say "Hey BMO", ask a question, and BMO starts answering in **under a second**. The upstream approach takes several seconds before you hear anything.
+
+### How the NPU sharing works
+
+The Hailo-10H has 8GB of memory. The LLM (Qwen 2.5, 2.3GB) and the Whisper STT model (125MB) both fit and **run simultaneously** on a shared VDevice. They coexist because Whisper is small enough. The VLM (Qwen2-VL, 2.3GB) can't coexist with the LLM — not a memory issue, but a HailoRT runtime limitation that only allows one generative model at a time. So when BMO needs to see, it releases the LLM, forks a child process for VLM inference, and reloads the LLM when the child exits.
 
 ---
 
 ## What runs where
 
-| Component | Where it runs | Notes |
-|-----------|--------------|-------|
-| LLM (`qwen2.5-instruct:1.5b`) | Hailo-10H NPU | via `hailo-ollama` |
-| Vision (`Qwen2-VL-2B-Instruct`) | Hailo-10H NPU | via HailoRT Python API; optional, requires camera |
-| STT (Whisper base.en) | CPU | via `whisper.cpp`; NPU path causes PCIe timeouts |
-| TTS (Piper) | CPU | streams sentence-by-sentence while LLM generates |
-| Wake word (openWakeWord) | CPU | "Hey BMO" custom model |
-
-STT runs on the CPU by design. Pushing 16kHz audio arrays through the Hailo PCIe bus caused consistent 15+ second timeouts during development. `whisper.cpp` on the quad-core ARM is fast enough and keeps the NPU free for inference.
+| Component | Runtime | Model | Notes |
+|---|---|---|---|
+| LLM | Hailo-10H NPU | Qwen2.5-1.5B-Instruct | Direct Python API, KV-cached system prompt |
+| Vision (VLM) | Hailo-10H NPU | Qwen2-VL-2B-Instruct | Runs in subprocess (NPU holds one generative model at a time) |
+| STT | Hailo-10H NPU | Whisper-Base | Coexists with LLM on shared VDevice; CPU whisper.cpp fallback |
+| TTS | CPU | Piper en_GB-semaine-medium | Persistent audio stream, sentence-by-sentence |
+| Wake word | CPU | OpenWakeWord (custom wakeword.onnx) | Suppressed during speech/music to prevent false triggers |
 
 ---
 
 ## Interfaces
 
 ### On-Device (`agent_hailo.py`)
-BMO in its natural habitat. Plug in a screen, a USB mic, and a USB speaker and you get the full experience: animated faces, wake word detection, and the whole listen → think → speak loop running locally. After each response, BMO stays in "Still listening..." mode for 8 seconds so you can keep a conversation going without re-saying the wake word every time.
+BMO in its natural habitat. Plug in a screen, a USB mic, and a USB speaker and you get the full experience: 22+ animated face states, wake word detection, and the whole listen -> think -> speak loop running locally. When listening, BMO shows a microphone with an animated VU meter that reacts to your voice in real time. When taking a photo, BMO switches to a dedicated camera face with a shutter animation. After each response, BMO stays in "Still listening..." mode for 8 seconds so you can keep a conversation going without re-saying the wake word every time.
 
 ### Web (`web_app.py`)
 A FastAPI server with a browser-based UI — useful if you want to talk to BMO from another room, or you'd rather not have a screen hanging off your Pi. Hold a button to record, and BMO responds with audio in your browser.
@@ -50,7 +71,8 @@ BMO includes several dynamic, interactive capabilities beyond basic conversation
 - **Minigames:** BMO is a living game console. Say *"Let's play Trivia"* or *"Let's play a guessing game"* — BMO will act as the host, wait for your answers, and keep score.
 - **Vision Analysis:** Hold an object up to the camera and say *"What am I holding?"* or *"Does this look good?"*. BMO will snap a photo, analyze it using the local VLM, and give you its opinion.
 - **Musical Talent:** Ask BMO to *"Play some music"* or *"Sing a song"*, and BMO will cycle into a dancing `Jamming` face while playing chiptunes (add your own `.wav` files to `sounds/music/`).
-- **Idle Pet Animations:** When left alone in Screensaver mode, BMO will periodically (and silently) show affection by flashing pixelated hearts, getting dizzy, or falling asleep to keep your desk feeling alive.
+- **Image Generation:** Ask BMO to *"Draw me a sunset"* and they'll generate an image via [Pollinations.ai](https://pollinations.ai/) and display it on-screen with a retro LCD border.
+- **Idle Pet Animations:** When left alone in Screensaver mode, BMO will periodically show affection by flashing pixelated hearts, getting dizzy, or falling asleep to keep your desk feeling alive.
 
 ---
 
@@ -85,43 +107,40 @@ Your BMO is then reachable from your phone, laptop, or any device on your Tailne
 ## Project structure
 
 ```
-be-more-agent/
-├── agent_hailo.py          # On-device GUI application
-├── web_app.py              # FastAPI web server
+be-more-hailo/
+├── agent_hailo.py          # On-device Tkinter GUI + animation + main loop
+├── web_app.py              # FastAPI web server + browser UI
+├── cli_chat.py             # Minimal CLI chat for quick testing
 ├── core/
 │   ├── config.py           # All configuration (models, devices, paths, system prompt)
-│   ├── llm.py              # LLM inference, web search, conversation history
-│   ├── tts.py              # Text-to-speech via Piper
-│   └── stt.py              # Speech-to-text via whisper.cpp
+│   ├── npu.py              # NPU device lifecycle (VDevice, LLM, VLM subprocess)
+│   ├── actions.py          # Keyword matching, response cleaning (pure functions, no HW)
+│   ├── llm.py              # Brain class: conversation history + inference orchestration
+│   ├── dispatch.py         # Stream chunk -> action dispatch (camera, music, timer, etc.)
+│   ├── audio_input.py      # Wake word detection + mic recording
+│   ├── screensaver.py      # Idle thought generation + animation loop
+│   ├── tts.py              # Piper TTS with persistent AudioPlayer stream
+│   ├── stt.py              # Whisper NPU (Speech2Text) + CPU fallback
+│   ├── search.py           # DuckDuckGo web search wrapper
+│   ├── log.py              # Colored logging
+│   ├── bubble.py           # Thought bubble Tkinter widget
+│   └── meter.py            # Mic level meter Tkinter widget
+├── generate_faces.py       # Procedural face generator (4x supersampled)
+├── faces/                  # 22+ expression directories with animation frames
+├── sounds/                 # Categorized audio: boot, greeting, thinking, camera, music, etc.
 ├── templates/              # Jinja2 HTML templates for the web UI
 ├── static/                 # CSS, JS, favicon
+├── models/                 # HEF files (LLM, VLM, Whisper) — gitignored
+├── piper/                  # Piper TTS engine and voice model — gitignored
+├── wakeword.onnx           # OpenWakeWord "Hey BMO" model
 ├── setup.sh                # Automated installation script
 ├── setup_services.sh       # Installs systemd background services
 ├── start_web.sh            # Starts the web server
 ├── start_agent.sh          # Starts the on-device GUI
-├── requirements.txt        # Python dependencies
-├── wakeword.onnx           # OpenWakeWord model
-├── piper/                  # Piper TTS engine and voice model
-├── models/                 # Whisper model weights + VLM HEF (auto-downloaded)
-├── whisper.cpp/            # Compiled whisper.cpp STT binary
-├── generate_faces.py       # Procedural face generator (4x supersampled)
-├── faces/                  # Generated face animations (13 expression states)
-│   ├── idle/               # Default resting face with blinking
-│   ├── speaking/           # Open mouth with teeth/tongue, round eyes
-│   ├── happy/              # Upturned arc eyes + smile
-│   ├── sad/                # Downturned eyes + frown
-│   ├── angry/              # Slash eyes + straight mouth
-│   ├── surprised/          # Circle eyes + O mouth
-│   ├── sleepy/             # Closed eyes + floating Zs
-│   ├── thinking/           # Scanning dot animation
-│   ├── dizzy/              # X eyes + wavy mouth
-│   ├── cheeky/             # Wink + tongue out
-│   ├── heart/              # Beating heart-shaped eyes
-│   ├── starry_eyed/        # Spinning 4-point sparkle stars
-│   └── confused/           # Mismatched eyes + wiggly mouth
-├── sounds/                 # GUI sound assets
-└── templates/ static/      # Web UI assets
+└── requirements.txt        # Python dependencies
 ```
+
+The `core/` modules follow SOLID principles — `actions.py` and `dispatch.py` are 100% testable without NPU hardware, `npu.py` owns all Hailo lifecycle, and `llm.py` only handles conversation logic.
 
 ---
 
@@ -131,7 +150,6 @@ be-more-agent/
 
 - Raspberry Pi OS (64-bit, current stable)
 - `hailo-h10-all` installed — the setup script handles this, but if installing manually: `sudo apt install hailo-h10-all`
-- `hailo-ollama` — the setup script builds this from source automatically. If installing manually, see [hailo_model_zoo_genai](https://github.com/hailo-ai/hailo_model_zoo_genai)
 
 ### Automated install
 
@@ -143,13 +161,10 @@ cd be-more-agent
 The script handles everything:
 - Installs system packages including `libcamera-apps` for camera support
 - Fixes the Hailo driver conflict (blacklists the legacy `hailo_pci` module)
-- Builds and installs `hailo-ollama` from source if not already present
 - Downloads and extracts the Piper TTS engine
-- Clones and compiles `whisper.cpp`
-- Downloads the `ggml-base.en` Whisper model
+- Clones and compiles `whisper.cpp` (CPU fallback)
+- Downloads model HEF files from Hailo's CDN
 - Creates a Python virtual environment and installs dependencies
-- Pulls `qwen2.5-instruct:1.5b` (LLM) via `hailo-ollama`
-- Downloads the `Qwen2-VL-2B-Instruct` VLM HEF directly from Hailo's CDN (~2.2 GB)
 - Enables system site-packages in the venv so Python can use `hailo_platform`
 - Checks camera availability and lets you know if anything's missing
 
@@ -181,11 +196,11 @@ source venv/bin/activate
 ./start_agent.sh
 ```
 
-**Auto-start LLM & GUI Services:**
+**Auto-start services:**
 ```bash
 ./setup_services.sh
 ```
-Then manage with `sudo systemctl start|stop|restart bmo-ollama` or `bmo-gui`.
+Then manage with `sudo systemctl start|stop|restart bmo-gui` or `bmo-web`.
 
 ---
 
@@ -194,42 +209,28 @@ Then manage with `sudo systemctl start|stop|restart bmo-ollama` or `bmo-gui`.
 All settings live in `core/config.py`. The most commonly changed values:
 
 ```python
-# LLM models (must be pulled via hailo-ollama)
-LLM_MODEL       = "qwen2.5-instruct:1.5b"
-FAST_LLM_MODEL  = "qwen2.5-instruct:1.5b"
+# LLM model HEF (direct NPU inference — no hailo-ollama needed)
+LLM_HEF_PATH = "./models/Qwen2.5-1.5B-Instruct.hef"
 
-# Vision model — runs directly via HailoRT Python API (not hailo-ollama)
-VLM_HEF_PATH    = "./models/Qwen2-VL-2B-Instruct.hef"
+# Vision model HEF
+VLM_HEF_PATH = "./models/Qwen2-VL-2B-Instruct.hef"
+
+# STT model HEF (NPU Whisper — 7x faster than CPU)
+WHISPER_HEF_PATH = "./models/Whisper-Base.hef"
 
 # Audio device for local hardware playback (run `aplay -l` to find yours)
-# The USB speaker is typically on a different ALSA card from the mic — check both.
 ALSA_DEVICE = "plughw:UACDemoV10,0"
 
 # Microphone device index (run `python3 -c "import sounddevice as sd; print(sd.query_devices())"`)
 MIC_DEVICE_INDEX = 1
 MIC_SAMPLE_RATE  = 48000
-
-# STT binary and model
-WHISPER_CMD   = "./whisper.cpp/build/bin/whisper-cli"
-WHISPER_MODEL = "./models/ggml-base.en.bin"
 ```
 
 Environment variables override any of these at runtime:
 ```bash
 export ALSA_DEVICE="plughw:2,0"
+export SILENCE_THRESHOLD=60000
 ```
-
----
-
-## Dual-model routing
-
-By default, all queries go to a single model (`qwen2.5-instruct:1.5b`). If you want to route longer or more complex queries to a larger model:
-
-1. Pull the larger model via `hailo-ollama`
-2. Set `LLM_MODEL` to the larger model name in `core/config.py`
-3. Keep `FAST_LLM_MODEL` pointing to `qwen2.5-instruct:1.5b`
-
-Short, simple prompts (under 15 words, no complex keywords) stay on the fast model. Longer or more complex ones go to `LLM_MODEL`. Note that swapping models on the Hailo-10H takes a few seconds on the first query after a switch.
 
 ---
 
@@ -242,9 +243,9 @@ If you have a Raspberry Pi Camera Module connected:
    ```bash
    sudo apt install -y libcamera-apps
    ```
-3. Say something like "Hey BMO, take a photo and tell me what you see" — the agent captures a frame with `rpicam-still` and sends it to the vision model (`Qwen2-VL-2B-Instruct`) running natively on the NPU via the HailoRT Python API
+3. Say something like "Hey BMO, take a photo and tell me what you see" — the agent captures a frame with `rpicam-still` and sends it to the VLM running natively on the NPU
 
-The VLM runs as a separate process from the LLM server. Hailo's VDevice sharing allows both to coexist on the same NPU without conflicts. If the VLM HEF file isn't installed, BMO will politely say so rather than crashing.
+The VLM runs in a child process with its own VDevice. The main process releases the LLM before forking, and reloads it when the child exits. This avoids the old `pkill hailo-ollama` approach that was prone to crashes and race conditions.
 
 ---
 
@@ -254,7 +255,7 @@ BMO is pretty easy to make your own:
 
 **Personality:** Edit `get_system_prompt()` in `core/config.py`. This is where BMO's voice, tone, and quirks are defined.
 
-**Faces:** BMO's faces are procedurally generated by `generate_faces.py` using 4x supersampling for perfectly smooth, anti-aliased lines. Run `python generate_faces.py` to regenerate all 74 frames across 13 expression states. The generator precisely matches the original BMO art style — pixel-accurate eye positions, rounded line caps, and correct interior mouth colours.
+**Faces:** BMO's faces are procedurally generated by `generate_faces.py` using 4x supersampling for perfectly smooth, anti-aliased lines. Run `python generate_faces.py` to regenerate all frames across 22+ expression states.
 
 **Expressions:** The LLM can trigger any expression by outputting `{"action": "set_expression", "value": "happy"}`. Available emotions:
 
@@ -270,10 +271,11 @@ BMO is pretty easy to make your own:
 | `heart` | Beating heart-shaped eyes (scales up and down) |
 | `starry_eyed` | Spinning 4-point sparkle stars for eyes |
 | `confused` | One oversized eye, one flat line, wiggly mouth |
-| `daydream` | Eyes drifted up with floating thought bubbles *(screensaver)* |
-| `bored` | Eyes shifting left and right *(screensaver)* |
-| `jamming` | Closed eyes, big smile, bouncing musical notes *(screensaver)* |
-| `curious` | One eye pulsing larger than the other, tilted look *(screensaver)* |
+| `jamming` | Closed eyes, big smile, bouncing musical notes |
+| `football` | Football persona gag *(screensaver)* |
+| `detective` | Detective persona gag *(screensaver)* |
+| `sir_mano` | Sir Mano persona gag *(screensaver)* |
+| `bee` | Bee persona gag *(screensaver)* |
 
 **Sounds:** Put `.wav` files in `sounds/<category>/`. BMO picks one at random per event.
 
@@ -292,7 +294,7 @@ When BMO has been idle for 60 seconds, it enters screensaver mode and cycles thr
 3. Speaking the generated thought via Piper TTS
 
 BMO stays quiet during:
-- **Night hours** (10 PM – 8 AM)
+- **Night hours** (10 PM - 8 AM)
 - **Recent interaction** (within 60 seconds of your last conversation)
 
 This all runs locally — search results go through DuckDuckGo and the LLM processes them on the Hailo NPU.
@@ -300,19 +302,6 @@ This all runs locally — search results go through DuckDuckGo and the LLM proce
 ---
 
 ## Troubleshooting
-
-**LLM shows as offline / can't connect to port 8000**
-
-Check if `hailo-ollama` is running:
-```bash
-sudo systemctl status bmo-ollama
-```
-If the service isn't set up yet, start it manually:
-```bash
-export OLLAMA_HOST=0.0.0.0:8000
-hailo-ollama serve
-```
-If `hailo-ollama` isn't found, re-run `./setup.sh` — it will build and install it from source.
 
 **Hailo NPU not detected (`/dev/hailo0` missing)**
 
@@ -368,7 +357,7 @@ If it fails, ensure system site-packages are enabled: `grep include-system venv/
 
 ## Credits
 
-The original project is entirely the work of [@brenpoly](https://github.com/brenpoly/be-more-agent) — the concept, the character, and the original implementation. This fork adds Hailo NPU support, the web interface, dual-interface `core/` modules, and various fixes and improvements.
+The original project is entirely the work of [@brenpoly](https://github.com/brenpoly/be-more-agent) — the concept, the character, and the original implementation. [@moorew](https://github.com/moorew/be-more-hailo) created the Hailo-10H fork that this project builds on, adding the web interface, the shared `core/` module layer, and initial Hailo NPU support via hailo-ollama. This fork takes that further with direct NPU inference APIs, modular architecture, and the performance optimizations described above.
 
 **"BMO"** and **"Adventure Time"** are trademarks of Cartoon Network (Warner Bros. Discovery). This is a fan project for personal and educational use only, not affiliated with or endorsed by Cartoon Network.
 

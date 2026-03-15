@@ -17,10 +17,6 @@ LLM_HEF_PATH = os.environ.get("LLM_HEF_PATH", "./models/Qwen2.5-1.5B-Instruct.he
 # The HEF file is a precompiled model binary from Hailo's model zoo
 VLM_HEF_PATH = os.environ.get("VLM_HEF_PATH", "./models/Qwen2-VL-2B-Instruct.hef")
 
-# Gemini Settings
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "") # Add your Gemini API key to a .env file
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
 def get_system_prompt():
     current_time = datetime.datetime.now().strftime("%I:%M %p")
     current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")

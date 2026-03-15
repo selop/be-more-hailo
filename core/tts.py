@@ -3,7 +3,6 @@ import logging
 import os
 import re
 import json
-import struct
 import threading
 import wave
 from .config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE

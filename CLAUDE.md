@@ -28,7 +28,7 @@ sudo systemctl start bmo-gui   # or bmo-web
 sudo journalctl -u bmo-web -f  # view logs
 ```
 
-There is no formal test suite (no pytest). Benchmark files (`benchmark_llm.py`, `benchmark_stt.py`) are standalone verification scripts run manually.
+There is no formal test suite (no pytest). Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually.
 
 ## Architecture
 
@@ -38,16 +38,21 @@ There is no formal test suite (no pytest). Benchmark files (`benchmark_llm.py`, 
 agent_hailo.py  ─┐
                   ├──► core/  ──► hailo_platform.genai (NPU) ──► Hailo-10H
 web_app.py      ─┘      │
-                         ├── config.py   # All paths, models, system prompt, ALSA devices
-                         ├── llm.py      # LLM inference (direct NPU), VLM (subprocess), conversation history
-                         ├── tts.py      # Piper TTS with persistent AudioPlayer, pronunciation customization
-                         ├── stt.py      # Speech2Text on NPU (CPU whisper.cpp fallback)
-                         └── search.py   # DuckDuckGo web search integration
+                         ├── config.py       # All paths, models, system prompt, ALSA devices
+                         ├── npu.py          # VDevice + LLM + VLM lifecycle (hardware layer)
+                         ├── actions.py      # Keyword matching, response cleaning (pure functions, no HW)
+                         ├── llm.py          # Brain class: conversation history + inference orchestration
+                         ├── dispatch.py     # Stream chunk → action dispatch (camera, music, timer)
+                         ├── audio_input.py  # Wake word detection + mic recording
+                         ├── screensaver.py  # Idle thought generation + animation loop
+                         ├── tts.py          # Piper TTS with persistent AudioPlayer
+                         ├── stt.py          # Speech2Text on NPU (CPU whisper.cpp fallback)
+                         └── search.py       # DuckDuckGo web search integration
 ```
 
-- **`agent_hailo.py`** — Tkinter fullscreen GUI with 22+ animated expression states, wake word detection (OpenWakeWord), mid-speech interruption, screensaver with idle pet animations, sound/music playback
+- **`agent_hailo.py`** — Tkinter fullscreen GUI with 22+ animated expression states, sound/music playback, main conversation loop
 - **`web_app.py`** — FastAPI server with WebSocket audio streaming, browser-based UI in `templates/index.html`
-- **`core/`** — Shared modules used by both interfaces. This is where LLM calls, TTS, STT, and search logic live
+- **`core/`** — Shared modules used by both interfaces. `npu.py` owns all Hailo hardware interaction, `actions.py` and `dispatch.py` are pure-function modules testable without NPU hardware
 
 ### AI/ML Stack
 
