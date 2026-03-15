@@ -199,7 +199,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 async def transcribe(audio: UploadFile = File(...)):
     """
     Receive an audio file from the browser, save it temporarily,
-    and transcribe it using whisper.cpp.
+    and transcribe it using NPU Speech2Text (or CPU whisper.cpp fallback).
     """
     temp_filename = f"temp_{uuid.uuid4().hex}.webm"
     temp_filepath = os.path.join("static", "audio", temp_filename)

@@ -48,21 +48,8 @@ def benchmark_direct(prompts, warmup=True):
         # Warm up with a throwaway query
         messages = [{"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": "Hi"}]
-        prompt = _format_prompt(messages)
-        llm.generate_all(prompt=prompt, temperature=0.4, max_generated_tokens=20)
+        llm.generate_all(prompt=messages, temperature=0.4, max_generated_tokens=20)
         print("  Warmup done\n")
-
-    # Also test if the API accepts message lists directly (no ChatML formatting)
-    messages_test = [{"role": "system", "content": SYSTEM_PROMPT},
-                     {"role": "user", "content": "Say ok"}]
-    try:
-        result = llm.generate_all(prompt=messages_test, temperature=0.4, max_generated_tokens=10)
-        native_messages = True
-        print(f"  Native message list support: YES (got: {result[:40]!r})")
-    except Exception as e:
-        native_messages = False
-        print(f"  Native message list support: NO ({e})")
-    print()
 
     results = []
     for p in prompts:
@@ -109,7 +96,6 @@ def benchmark_direct(prompts, warmup=True):
     return {
         "mode": "direct_npu",
         "init_time_s": round(init_time, 2),
-        "native_messages": native_messages,
         "results": results,
     }
 

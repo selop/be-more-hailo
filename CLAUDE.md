@@ -23,15 +23,12 @@ source venv/bin/activate
 # CLI chat (minimal, for quick testing)
 python cli_chat.py
 
-# Start LLM server manually
-export OLLAMA_HOST=0.0.0.0:8000 && hailo-ollama serve
-
 # Systemd services (production)
-sudo systemctl start bmo-ollama bmo-gui   # or bmo-web
-sudo journalctl -u bmo-web -f             # view logs
+sudo systemctl start bmo-gui   # or bmo-web
+sudo journalctl -u bmo-web -f  # view logs
 ```
 
-There is no formal test suite (no pytest). Test files (`test_hailo.py`, `test_music_images.py`, etc.) are standalone benchmark/verification scripts run manually.
+There is no formal test suite (no pytest). Benchmark files (`benchmark_llm.py`, `benchmark_stt.py`) are standalone verification scripts run manually.
 
 ## Architecture
 
@@ -39,58 +36,62 @@ There is no formal test suite (no pytest). Test files (`test_hailo.py`, `test_mu
 
 ```
 agent_hailo.py  ─┐
-                  ├──► core/  ──► hailo-ollama (NPU) ──► Hailo-10H
+                  ├──► core/  ──► hailo_platform.genai (NPU) ──► Hailo-10H
 web_app.py      ─┘      │
                          ├── config.py   # All paths, models, system prompt, ALSA devices
-                         ├── llm.py      # LLM inference, conversation history, vision, web search
-                         ├── tts.py      # Piper TTS with pronunciation customization
-                         ├── stt.py      # whisper.cpp transcription (runs on CPU by design)
+                         ├── llm.py      # LLM inference (direct NPU), VLM (subprocess), conversation history
+                         ├── tts.py      # Piper TTS with persistent AudioPlayer, pronunciation customization
+                         ├── stt.py      # Speech2Text on NPU (CPU whisper.cpp fallback)
                          └── search.py   # DuckDuckGo web search integration
 ```
 
-- **`agent_hailo.py`** (~1130 lines) — Tkinter fullscreen GUI with 22+ animated expression states, wake word detection (OpenWakeWord), screensaver with idle pet animations, sound/music playback
-- **`web_app.py`** (~330 lines) — FastAPI server with WebSocket audio streaming, browser-based UI in `templates/index.html`
+- **`agent_hailo.py`** — Tkinter fullscreen GUI with 22+ animated expression states, wake word detection (OpenWakeWord), mid-speech interruption, screensaver with idle pet animations, sound/music playback
+- **`web_app.py`** — FastAPI server with WebSocket audio streaming, browser-based UI in `templates/index.html`
 - **`core/`** — Shared modules used by both interfaces. This is where LLM calls, TTS, STT, and search logic live
 
 ### AI/ML Stack
 
 | Component | Runtime | Model |
 |-----------|---------|-------|
-| LLM | Hailo-10H NPU | qwen2.5-instruct:1.5b via hailo-ollama |
-| Vision (VLM) | Hailo-10H NPU | Qwen2-VL-2B-Instruct via HailoRT Python API |
-| STT | CPU (ARM) | whisper base.en via whisper.cpp |
-| TTS | CPU | Piper en_GB-semaine-medium |
+| LLM | Hailo-10H NPU | Qwen2.5-1.5B-Instruct via `hailo_platform.genai.LLM` (direct Python API) |
+| Vision (VLM) | Hailo-10H NPU | Qwen2-VL-2B-Instruct via `hailo_platform.genai.VLM` (runs in subprocess — NPU only holds one generative model at a time) |
+| STT | Hailo-10H NPU | Whisper-Base via `hailo_platform.genai.Speech2Text` (coexists with LLM on shared VDevice; CPU whisper.cpp fallback) |
+| TTS | CPU | Piper en_GB-semaine-medium (persistent AudioPlayer stream) |
 | Wake Word | CPU | OpenWakeWord (custom wakeword.onnx) |
 
-STT runs on CPU intentionally — pushing audio through PCIe to the Hailo NPU caused 15+ second timeouts. whisper.cpp on CPU is fast enough and keeps the NPU free for LLM inference.
+LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whisper (125MB) is small enough. VLM (2.3GB) cannot coexist with LLM (2.3GB) — not a memory issue (8GB available) but a HailoRT 5.1.1 genai runtime limitation that only allows one generative model at a time. VLM runs in a child process with its own VDevice.
 
 ### Key Design Patterns
 
 - **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes
 - **Sentence-streaming TTS**: Response is split sentence-by-sentence; TTS plays each sentence as LLM continues generating
+- **System prompt caching**: `llm.save_context()` / `llm.load_context()` caches system prompt KV state at startup — not re-processed every turn
+- **Mid-speech interruption**: Background wake word listener during TTS; sets `_interrupted` flag and stops playback so user can immediately speak
 - **Pronunciation system**: User corrects pronunciation → LLM appends `!PRONOUNCE: word=phonetic` → saved to `pronunciations.json` → Piper substitutions
-- **Dual-model routing** (in `core/llm.py`): Short simple prompts use `FAST_LLM_MODEL`, complex queries use `LLM_MODEL` (currently both set to same model to avoid NPU swap crashes)
+- **VLM subprocess swap**: Main process releases STT+LLM+VDevice → forks child → child loads VLM → inference → child exits → parent reloads LLM+STT+system prompt cache
 - **Screensaver**: Triggers after 60s idle, cycles through expression personas, speaks random LLM-generated thoughts every ~30 min (respects night hours 10PM-8AM)
 
 ### Asset Directories
 
 - `faces/` — 22+ expression directories with animation frames (generated by `generate_faces.py`)
-- `sounds/` — Categorized audio: `greeting_sounds/`, `thinking_sounds/`, `ack_sounds/`, `error_sounds/`, `music/`
+- `sounds/` — Categorized audio: `greeting_sounds/`, `thinking_sounds/`, `analyzing_sounds/`, `ack_sounds/`, `camera_sounds/`, `music/`
 - `piper/` — TTS engine binary and voice model (gitignored)
-- `whisper.cpp/` — Compiled whisper binary (gitignored)
-- `models/` — Whisper model + VLM HEF file (gitignored)
+- `whisper.cpp/` — Compiled whisper binary for CPU fallback (gitignored)
+- `models/` — HEF files: `Qwen2.5-1.5B-Instruct.hef` (LLM), `Qwen2-VL-2B-Instruct.hef` (VLM), `Whisper-Base.hef` (STT), `ggml-base.en.bin` (CPU fallback) — all gitignored
 
 ## Configuration
 
 All configuration lives in `core/config.py`. Key settings:
-- `LLM_URL` — hailo-ollama endpoint (default `http://127.0.0.1:8000/api/chat`)
-- `LLM_MODEL` / `FAST_LLM_MODEL` — Ollama model names
+- `LLM_HEF_PATH` — LLM model HEF (default `./models/Qwen2.5-1.5B-Instruct.hef`)
+- `VLM_HEF_PATH` — VLM model HEF (default `./models/Qwen2-VL-2B-Instruct.hef`)
+- `WHISPER_HEF_PATH` — STT model HEF (default `./models/Whisper-Base.hef`)
 - `ALSA_DEVICE` — Speaker output device (override with `ALSA_DEVICE` env var)
 - `MIC_DEVICE_INDEX` — sounddevice input index
 - `WAKE_WORD_THRESHOLD` — Wake word sensitivity (default 0.35)
+- `SILENCE_THRESHOLD` — Mic silence detection level (override with `SILENCE_THRESHOLD` env var)
 - `get_system_prompt()` — BMO's personality, behavior rules, and action JSON formats
 
-Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `VLM_HEF_PATH`.
+Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `BMO_LANGUAGE` (en/de).
 
 ## Deployment
 

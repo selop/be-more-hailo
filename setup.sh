@@ -97,9 +97,9 @@ wget -nc -q -O piper/en_GB-semaine-medium.onnx      "$BASE_VOICE/en_GB-semaine-m
 wget -nc -q -O piper/en_GB-semaine-medium.onnx.json "$BASE_VOICE/en_GB-semaine-medium.onnx.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. whisper.cpp (CPU-based STT)
+# 7. whisper.cpp (CPU fallback for STT — primary STT runs on NPU via Whisper HEF)
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${YELLOW}[7/13] Building whisper.cpp for CPU STT...${NC}"
+echo -e "${YELLOW}[7/13] Building whisper.cpp (CPU STT fallback)...${NC}"
 if [ ! -f "whisper.cpp/build/bin/whisper-cli" ]; then
     if [ ! -d "whisper.cpp" ]; then
         git clone https://github.com/ggerganov/whisper.cpp.git
@@ -116,42 +116,20 @@ if [ ! -f "models/ggml-base.en.bin" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Build and install hailo-ollama (LLM server for Hailo NPU)
+# 8. Download LLM HEF (direct NPU inference — no hailo-ollama needed)
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${YELLOW}[8/13] Setting up hailo-ollama...${NC}"
-if command -v hailo-ollama &>/dev/null; then
-    echo -e "${GREEN}  hailo-ollama is already installed.${NC}"
+echo -e "${YELLOW}[8/13] Downloading LLM model (Qwen2.5-1.5B — ~2.3 GB)...${NC}"
+LLM_HEF="models/Qwen2.5-1.5B-Instruct.hef"
+if [ -f "$LLM_HEF" ]; then
+    echo -e "${GREEN}  LLM HEF already present.${NC}"
 else
-    echo "  Building hailo-ollama from source (this takes a few minutes)..."
-    HAILO_OLLAMA_VERSION="v${HAILORT_VER}"
-    BUILD_DIR="/tmp/hailo_model_zoo_genai"
-    rm -rf "$BUILD_DIR"
-    git clone --branch "$HAILO_OLLAMA_VERSION" --depth 1 \
-        https://github.com/hailo-ai/hailo_model_zoo_genai.git "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR/build"
-    cmake -B "$BUILD_DIR/build" -S "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$BUILD_DIR/build" --config Release -j$(nproc)
-
-    # Install binary
-    sudo cp "$BUILD_DIR/build/src/apps/server/hailo-ollama" /usr/bin/hailo-ollama
-    sudo chmod +x /usr/bin/hailo-ollama
-
-    # Install config and model manifests
-    mkdir -p ~/.config/hailo-ollama
-    cp "$BUILD_DIR/config/hailo-ollama.json" ~/.config/hailo-ollama/
-    mkdir -p ~/.local/share/hailo-ollama
-    cp -r "$BUILD_DIR/models/" ~/.local/share/hailo-ollama/
-
-    rm -rf "$BUILD_DIR"
-    echo -e "${GREEN}  hailo-ollama installed successfully.${NC}"
-fi
-
-# Start hailo-ollama for model pulling
-if ! curl -sf http://localhost:8000/api/tags > /dev/null 2>&1; then
-    echo "  Starting hailo-ollama server..."
-    export OLLAMA_HOST=0.0.0.0:8000
-    nohup hailo-ollama serve > /tmp/ollama.log 2>&1 &
-    sleep 3
+    LLM_URL="https://dev-public.hailo.ai/v${HAILORT_VER}/blob/Qwen2.5-1.5B-Instruct.hef"
+    echo "  Downloading from $LLM_URL ..."
+    wget -c --tries=3 -O "$LLM_HEF" "$LLM_URL" 2>&1 || {
+        echo -e "${RED}  Failed to download LLM HEF.${NC}"
+        echo -e "${YELLOW}  You can download it manually later:${NC}"
+        echo "    wget -O $LLM_HEF $LLM_URL"
+    }
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,17 +152,19 @@ pip install --upgrade pip setuptools wheel -q
 pip install -r requirements.txt -q
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 10. Pull LLM model via hailo-ollama
+# 10. Download Whisper HEF (NPU Speech-to-Text)
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${YELLOW}[10/13] Pulling LLM model via hailo-ollama...${NC}"
-OLLAMA_URL="http://localhost:8000/api"
-
-echo "  Pulling LLM: qwen2.5-instruct:1.5b..."
-curl -sf "$OLLAMA_URL/pull" \
-    -H 'Content-Type: application/json' \
-    -d '{"model": "qwen2.5-instruct:1.5b", "stream": false}' \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print('  Done.' if d.get('status')=='success' else f'  Warning: {d}')" \
-    2>/dev/null || echo -e "${RED}  Could not reach hailo-ollama at $OLLAMA_URL. Start it first if needed.${NC}"
+echo -e "${YELLOW}[10/13] Downloading Whisper model (NPU STT — ~130 MB)...${NC}"
+WHISPER_HEF="models/Whisper-Base.hef"
+if [ -f "$WHISPER_HEF" ]; then
+    echo -e "${GREEN}  Whisper HEF already present.${NC}"
+else
+    WHISPER_URL="https://dev-public.hailo.ai/v${HAILORT_VER}/blob/Whisper-Base.hef"
+    echo "  Downloading from $WHISPER_URL ..."
+    wget -c --tries=3 -O "$WHISPER_HEF" "$WHISPER_URL" 2>&1 || {
+        echo -e "${YELLOW}  Could not download Whisper HEF. CPU whisper.cpp will be used as fallback.${NC}"
+    }
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 11. Download VLM HEF (Vision Language Model for camera features)
