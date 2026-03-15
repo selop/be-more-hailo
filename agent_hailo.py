@@ -1299,6 +1299,8 @@ class BotGUI:
                         self.last_screensaver_audio_time = time.time()
 
 if __name__ == "__main__":
+    import signal
     root = tk.Tk()
     app = BotGUI(root)
+    signal.signal(signal.SIGINT, lambda *_: (app.stop_event.set(), root.quit()))
     root.mainloop()
