@@ -192,11 +192,10 @@ class BotGUI:
                 player.stop_playback()
                 bmo_print("MUTE", "Stopped persistent audio player.")
             try:
-                # Kill any hardware audio playing via aplay (sound effects)
+                # Kill any sound effects playing via aplay
                 subprocess.run(["killall", "-9", "aplay"], capture_output=True)
-                bmo_print("MUTE", "Killed aplay process.")
-            except Exception as e:
-                bmo_print("MUTE", f"Error stopping aplay: {e}")
+            except Exception:
+                pass
                 
             old_state = self.current_state
             self.set_state(BotStates.SHHH, "Muted")
@@ -772,9 +771,9 @@ class BotGUI:
                         try:
                             # Try libcamera-still (older) or rpicam-still (newer Pi OS)
                             cam_cmd = None
+                            import shutil
                             for candidate in ['libcamera-still', 'rpicam-still']:
-                                r = subprocess.run(['which', candidate], capture_output=True)
-                                if r.returncode == 0:
+                                if shutil.which(candidate):
                                     cam_cmd = candidate
                                     break
                             if cam_cmd is None:
@@ -1052,7 +1051,7 @@ class BotGUI:
                 if not self.is_muted and os.path.exists(sound_file):
                     try:
                         subprocess.Popen(['aplay', '-D', ALSA_DEVICE, '-q', sound_file])
-                    except Exception as e:
+                    except Exception:
                         pass
                 
                 # Hold the persona animation for 8 seconds

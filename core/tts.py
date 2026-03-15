@@ -94,6 +94,7 @@ class AudioPlayer:
 
         self._sd = sd
         self._stop_event = threading.Event()
+        self._play_lock = threading.Lock()
         self._device_index = self._find_device(alsa_device_name)
 
         # Open a persistent output stream
@@ -130,21 +131,24 @@ class AudioPlayer:
         return None
 
     def play(self, pcm_bytes: bytes):
-        """Play raw int16 PCM bytes. Can be interrupted via stop_playback()."""
-        self._stop_event.clear()
-        chunk_bytes = self.CHUNK_FRAMES * 2  # int16 = 2 bytes per sample
+        """Play raw int16 PCM bytes. Can be interrupted via stop_playback().
+        Thread-safe: only one playback at a time (new play() interrupts previous)."""
+        # Interrupt any in-progress playback and wait for the lock
+        self._stop_event.set()
+        with self._play_lock:
+            self._stop_event.clear()
+            chunk_bytes = self.CHUNK_FRAMES * 2  # int16 = 2 bytes per sample
 
-        import numpy as np
-        offset = 0
-        while offset < len(pcm_bytes):
-            if self._stop_event.is_set():
-                logger.info("AudioPlayer: playback interrupted")
-                break
-            end = min(offset + chunk_bytes, len(pcm_bytes))
-            chunk = np.frombuffer(pcm_bytes[offset:end], dtype='int16')
-            # Reshape for single-channel write
-            self._stream.write(chunk.reshape(-1, 1))
-            offset = end
+            import numpy as np
+            offset = 0
+            while offset < len(pcm_bytes):
+                if self._stop_event.is_set():
+                    break
+                end = min(offset + chunk_bytes, len(pcm_bytes))
+                chunk = np.frombuffer(pcm_bytes[offset:end], dtype='int16')
+                # Reshape for single-channel write
+                self._stream.write(chunk.reshape(-1, 1))
+                offset = end
 
     def stop_playback(self):
         """Interrupt current playback immediately."""
@@ -162,6 +166,89 @@ class AudioPlayer:
             logger.info("AudioPlayer: stream closed")
         except Exception as e:
             logger.warning(f"AudioPlayer: close error: {e}")
+
+
+class SoundHandle:
+    """Mimics subprocess.Popen interface (.wait(), .terminate()) for in-process playback."""
+
+    def __init__(self):
+        self._done = threading.Event()
+        self._thread = None
+
+    def _run(self, player, pcm_bytes):
+        try:
+            player.play(pcm_bytes)
+        finally:
+            self._done.set()
+
+    def start(self, player, pcm_bytes):
+        self._thread = threading.Thread(target=self._run, args=(player, pcm_bytes), daemon=True)
+        self._thread.start()
+
+    def wait(self, timeout=None):
+        self._done.wait(timeout=timeout)
+
+    def terminate(self):
+        player = get_player()
+        if player:
+            player.stop_playback()
+
+    @property
+    def returncode(self):
+        return 0 if self._done.is_set() else None
+
+
+def play_wav_file(filepath: str):
+    """Play a WAV file through the persistent AudioPlayer.
+    Returns a SoundHandle with .wait() and .terminate() (like Popen)."""
+    import wave as _wave
+    import numpy as np
+
+    player = get_player()
+    if player is None:
+        return None
+
+    try:
+        with _wave.open(filepath, 'rb') as wf:
+            sample_rate = wf.getframerate()
+            n_channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+
+        # Convert to int16 if needed
+        if sampwidth == 2:
+            pcm = raw
+        elif sampwidth == 1:
+            arr = np.frombuffer(raw, dtype=np.uint8).astype(np.int16)
+            pcm = ((arr - 128) * 256).tobytes()
+        elif sampwidth == 4:
+            arr = np.frombuffer(raw, dtype=np.int32)
+            pcm = (arr >> 16).astype(np.int16).tobytes()
+        else:
+            logger.warning(f"Unsupported sample width {sampwidth} in {filepath}")
+            return None
+
+        # Mix to mono if stereo
+        if n_channels > 1:
+            arr = np.frombuffer(pcm, dtype=np.int16).reshape(-1, n_channels)
+            pcm = arr[:, 0].tobytes()
+
+        # Resample to 22050 if needed (AudioPlayer expects 22050Hz)
+        if sample_rate != AudioPlayer.SAMPLE_RATE:
+            from scipy.signal import resample
+            arr = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+            num_samples = int(len(arr) * AudioPlayer.SAMPLE_RATE / sample_rate)
+            arr = resample(arr, num_samples)
+            pcm = np.clip(arr, -32768, 32767).astype(np.int16).tobytes()
+
+        player.resume()  # clear any previous stop event
+        handle = SoundHandle()
+        handle.start(player, pcm)
+        return handle
+
+    except Exception as e:
+        logger.warning(f"play_wav_file error for {filepath}: {e}")
+        return None
 
 
 # =========================================================================
