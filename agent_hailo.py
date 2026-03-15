@@ -327,7 +327,9 @@ class BotGUI:
 
         frames = self.animations.get(self.current_state, []) or self.animations.get(BotStates.IDLE, [])
         if frames:
-            self.current_frame = (self.current_frame + 1) % len(frames)
+            # During WARMUP, the boot sequence controls the frame — don't auto-advance
+            if self.current_state != BotStates.WARMUP:
+                self.current_frame = (self.current_frame + 1) % len(frames)
             
             # Re-shuffle screensaver sequences when loop completes
             if self.current_state == BotStates.SCREENSAVER and self.current_frame == 0:
@@ -336,7 +338,7 @@ class BotGUI:
                 for name, seq in self.screensaver_sequences:
                     self.animations[BotStates.SCREENSAVER].extend(seq * 2)
                 
-            self.background_label.config(image=frames[self.current_frame])
+            self.background_label.config(image=frames[min(self.current_frame, len(frames) - 1)])
         
         # Match web UI animation speeds
         speed = 500
