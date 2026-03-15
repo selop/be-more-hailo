@@ -3,12 +3,12 @@
 ## Current BMO Pipeline
 
 ```
-Mic (48kHz) → sounddevice → WAV file → FFmpeg (16kHz) → whisper.cpp (CPU subprocess)
+Mic (48kHz) → sounddevice → WAV file → Speech2Text (NPU, Python API)
     → text → LLM.generate() (NPU, direct Python API, streaming)
     → sentence chunker → piper Python lib → AudioPlayer (persistent stream)
 ```
 
-Tier 1+2 eliminated hailo-ollama and most subprocess calls. Remaining subprocesses: FFmpeg (STT prep), whisper.cpp (STT).
+Tiers 1-3A eliminated hailo-ollama, whisper.cpp, and FFmpeg from the hot path. Remaining subprocesses: `aplay` (sound effects only — not latency-critical), `rpicam-still` (camera capture).
 
 ## Hailo-Apps Reference Pipeline
 
@@ -79,17 +79,35 @@ Before starting any tier, verify:
 
 > **Rollback**: `hailo-ollama` is still installed. Re-enable with `sudo systemctl enable bmo-ollama && sudo systemctl start bmo-ollama`, then revert `core/llm.py`, `core/config.py`, `agent_hailo.py`, `web_app.py`, `cli_chat.py` to pre-Tier-2 state from git.
 
-### Tier 3 — Full Pipeline Rewrite (high risk, highest impact)
+### Tier 3 — Full Pipeline Rewrite (high risk, highest impact) — IN PROGRESS
 
-- Move STT to NPU via `hailo_platform.genai.Speech2Text` (requires re-benchmarking — previous testing showed 15+ second PCIe timeouts; smaller Whisper HEF may coexist with LLM via `VDevice(group_id="SHARED")` since Whisper is much smaller than the VLM)
-- Add `webrtcvad` for proper silence/speech endpoint detection (changes the recording state machine in `record_audio()` — not a drop-in)
+#### Phase 3A — STT on NPU ✅ COMPLETE
+- ✅ `Speech2Text` on NPU via shared VDevice (`group_id="SHARED"`) — Whisper (125MB) coexists with LLM (2.3GB)
+- ✅ 7.3x faster transcription: **0.26s** vs 1.91s (whisper.cpp CPU)
+- ✅ CPU fallback if Whisper HEF is missing or init fails
+- ✅ STT released/reloaded during VLM subprocess swap
+- ✅ PCIe Gen 3 confirmed active (8GT/s) — no timeout issues on HailoRT 5.1.1
+- ✅ Whisper HEF: `./models/Whisper-Base.hef` (downloaded from `dev-public.hailo.ai/v5.1.1/blob/`)
+
+#### Phase 3C — Eliminate subprocesses ⚠️ PARTIAL
+- ✅ `shutil.which()` replaces `subprocess.run(['which', ...])` for camera detection
+- ❌ Sound effects stay on `aplay` subprocess — sharing the persistent AudioPlayer stream between TTS and sound effects causes ALSA assertion crashes and audio stuttering. `aplay` is reliable for fire-and-forget sound effects and isn't on the latency-critical path.
+- ✅ Wake word suppression during SPEAKING/JAMMING states (prevents BMO's own audio from triggering false detections)
+
+#### Phase 3B — webrtcvad for endpoint detection (not started)
+- Add `webrtcvad` for proper silence/speech endpoint detection
+- Changes the recording state machine in `record_audio()` — not a drop-in
+- Note: chunk-based silence detection works well enough; time-based approach was tested and reverted (background noise kept resetting the silence timer)
+
+#### Phase 3D — generation_id + TTS interruption (not started)
 - Add `generation_id` for TTS interruption support
 - Adopt token-level TTS callback pattern (queue sentences during streaming)
+
+#### Phase 3E — Async pipeline (not started)
 - Adopt `VoiceInteractionManager` pattern from hailo-apps
-- Eliminate all remaining subprocess calls from the hot path
 - Proper async architecture with `queue.Queue` between stages
 
-> **Rollback**: Tier 3 is a full pipeline rewrite. Maintain the Tier 2 codebase on a stable branch before starting. STT on NPU is conditional — fall back to whisper.cpp on CPU if PCIe timeouts persist.
+> **Rollback**: Tier 3 is incremental — each phase can be rolled back independently. STT on NPU falls back to whisper.cpp CPU automatically if the HEF is missing.
 
 ---
 
@@ -196,14 +214,24 @@ Larger model pairs (e.g. LLM 1.5B + VLM 2B) **cannot coexist** — use sequentia
 
 | Stage | Typical Latency | Notes |
 |-------|----------------|-------|
-| Wake word detection | Real-time | OWW runs continuously on CPU |
-| Audio recording | 1-10s | User-controlled; 1.5s min grace period |
-| FFmpeg conversion | ~100-300ms | 48kHz → 16kHz (kept — OWW needs 48kHz capture; skipped when input already 16kHz) |
-| whisper.cpp transcription | ~2-5s | CPU ARM64, base.en model |
+| Wake word detection | Real-time | OWW runs continuously on CPU (suppressed during SPEAKING/JAMMING) |
+| Audio recording | 1-30s | User-controlled; 1.5s grace period; chunk-based silence detection |
+| ~~FFmpeg conversion~~ | ~~100-300ms~~ | **Eliminated** — NPU Speech2Text handles resampling in-process (Tier 3A) |
+| STT transcription (NPU) | **~0.26s** | Down from ~1.9s with whisper.cpp CPU (Tier 3A, 7.3x faster) |
 | Pre-LLM keyword matching | <1ms | Pure Python string ops |
 | DuckDuckGo search (if triggered) | 1-3s | Network I/O, blocks before LLM |
 | LLM first token (direct NPU) | **~0.37s** | Down from ~0.55s with hailo-ollama (Tier 2) |
 | LLM streaming (per sentence) | ~0.5-2s | Depends on sentence length |
 | Piper TTS synthesis | ~0.5-1s | CPU, per sentence (now via piper-tts library when available) |
-| ~~aplay playback~~ | ~~Real-time~~ | **Eliminated** — persistent sounddevice OutputStream (Tier 1) |
-| VLM (analyze_image) | ~16s | Subprocess swap: release LLM → fork → VLM init + inference → exit → reload LLM |
+| ~~aplay playback~~ | ~~Real-time~~ | **Eliminated** for TTS — persistent sounddevice OutputStream (Tier 1). Sound effects still use aplay. |
+| VLM (analyze_image) | ~20-30s | Subprocess swap: release STT+LLM → fork → VLM init + inference → exit → reload LLM+STT |
+
+### Startup Profile (measured on Pi 5)
+
+| Component | Time | Notes |
+|-----------|------|-------|
+| Audio subsystem | ~0.03s | AudioPlayer + Piper init |
+| LLM (NPU) | ~12.5s | VDevice + HEF load + system prompt cache |
+| STT (NPU) | ~1.2s | Speech2Text on shared VDevice |
+| Wake word (OWW) | ~0.5s | ONNX model load |
+| **Total startup** | **~14.2s** | |
