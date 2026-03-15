@@ -412,31 +412,77 @@ def gen_confused(base_dir="faces/confused"):
         create_face(f"{base_dir}/confused_{i:02d}.png", draw_conf1 if i % 2 == 0 else draw_conf2)
 def gen_listening(base_dir="faces/listening"):
     ensure_dir(base_dir)
-    # Sound wave ear design — concentric arcs on each side ripple outward
-    # Arc radii for three concentric rings per ear
-    arc_radii = [18, 28, 38]
-    # Which arcs are visible per frame (indices into arc_radii)
-    frame_arcs = [
-        [0],        # 1: inner only
-        [0, 1],     # 2: inner + middle
-        [0, 1, 2],  # 3: all three
+    import glob
+    for f in glob.glob(f"{base_dir}/listening_*.png"):
+        os.remove(f)
+
+    # Centered microphone with sound waves entering from both sides
+    # Positioned in upper half so VU meter has clear space below
+    mic_cx, mic_cy = 399, 165
+    mic_w, mic_h = 36, 60      # Mic capsule dimensions
+    stand_h = 35                # Stand below capsule
+    base_w = 70                 # Base width
+
+    # Sound wave arcs on each side — ripple inward toward the mic
+    wave_radii = [90, 65, 42]
+    # Left waves face right ))  right waves face left ((
+    # Each frame shows different wave positions (rippling inward)
+    frame_waves = [
+        [0],        # 1: outer wave only
+        [0, 1],     # 2: outer + middle
+        [0, 1, 2],  # 3: all three — full signal
         [0, 1, 2],  # 4: all three
-        [1, 2],     # 5: middle + outer
-        [2],        # 6: outer only
-        [],         # 7: none
-        [0],        # 8: inner only (loop)
+        [1, 2],     # 5: middle + inner
+        [2],        # 6: inner only — wave arriving
+        [],         # 7: absorbed — no waves
+        [0],        # 8: new wave starting (loop)
     ]
-    for i, visible in enumerate(frame_arcs):
+
+    for i, visible in enumerate(frame_waves):
         def draw_listen(d, vis=visible):
-            # Left ear arcs — open rightward toward center: )))
+            s = SCALE
+
+            # Mic capsule — dark rounded rectangle
+            cap_color = (60, 60, 60)
+            cap_top = mic_cy - mic_h // 2
+            cap_bot = mic_cy + mic_h // 2
+            cap_left = mic_cx - mic_w // 2
+            cap_right = mic_cx + mic_w // 2
+            cap_box = [cap_left * s, cap_top * s, cap_right * s, cap_bot * s]
+            d.rounded_rectangle(cap_box, radius=mic_w // 2 * s, fill=cap_color, outline=LINE_COLOR, width=LINE_WIDTH * s)
+
+            # Mic grille lines (horizontal lines across the capsule)
+            grille_color = (100, 100, 100)
+            for gy in range(cap_top + 12, cap_bot - 8, 10):
+                d.line([(cap_left + 8) * s, gy * s, (cap_right - 8) * s, gy * s],
+                       fill=grille_color, width=2 * s)
+
+            # Stand — vertical line below capsule
+            d.line([mic_cx * s, cap_bot * s, mic_cx * s, (cap_bot + stand_h) * s],
+                   fill=LINE_COLOR, width=LINE_WIDTH * s)
+
+            # Base — horizontal line with rounded ends
+            base_y = cap_bot + stand_h
+            base_left = mic_cx - base_w // 2
+            base_right = mic_cx + base_w // 2
+            draw_line(d, base_left, base_y, base_right, base_y)
+
+            # Cradle arc — U-shape connecting capsule bottom to stand
+            cradle_r = mic_w // 2 + 8
+            draw_arc_eye(d, mic_cx, cap_bot - 5, cradle_r, 0, 180)
+
+            # Sound waves — arcs on left and right sides, rippling inward
+            wave_cx_left = mic_cx - 120   # Wave origin left
+            wave_cx_right = mic_cx + 120  # Wave origin right
+            wave_cy = mic_cy
+
             for idx in vis:
-                r = arc_radii[idx]
-                draw_arc_eye(d, LEFT_EYE_X, EYE_VISUAL_Y, r, 300, 60)
-            # Right ear arcs — open leftward toward center: (((
-            for idx in vis:
-                r = arc_radii[idx]
-                draw_arc_eye(d, RIGHT_EYE_X, EYE_VISUAL_Y, r, 120, 240)
-            # No mouth — meter canvas overlays this area
+                r = wave_radii[idx]
+                # Left side: )) facing right
+                draw_arc_eye(d, wave_cx_left, wave_cy, r, 315, 45)
+                # Right side: (( facing left
+                draw_arc_eye(d, wave_cx_right, wave_cy, r, 135, 225)
+
         create_face(f"{base_dir}/listening_{i+1:02d}.png", draw_listen)
 
 def gen_error(base_dir="faces/error"):
