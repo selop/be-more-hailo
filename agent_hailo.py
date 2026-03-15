@@ -852,6 +852,11 @@ class BotGUI:
                             self.speak(chunk)
 
                     if taking_photo:
+                        # Stop background wake word listener — not useful during photo capture
+                        # and BMO's own speech can trigger false interruptions
+                        _ww_stop.set()
+                        ww_thread.join(timeout=3)
+                        self._interrupted.clear()
                         # Kill any thinking audio from the STT phase before camera UX
                         if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
                             try:
