@@ -225,6 +225,7 @@ class BotGUI:
     # --- ANIMATION & SOUND ENGINE ---
     def load_sounds(self):
         self.sounds = {
+            "boot_sounds": [],
             "greeting_sounds": [],
             "ack_sounds": [],
             "thinking_sounds": [],
@@ -626,6 +627,9 @@ class BotGUI:
         init_audio(ALSA_DEVICE)
         atexit.register(shutdown_audio)
         bmo_print("BOOT", f"Audio subsystem: {time.time()-t0:.2f}s")
+
+        # Play a boot sound so the user knows BMO is starting up (~15s total)
+        boot_proc = self.play_sound("boot_sounds")
 
         # Initialize LLM + STT on the Hailo NPU (direct Python API)
         self.set_state(BotStates.WARMUP, "Loading Brain...")
