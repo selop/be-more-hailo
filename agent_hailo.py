@@ -980,8 +980,10 @@ class BotGUI:
                     bmo_print("ERROR", f"LLM/TTS pipeline: {e}")
                     traceback.print_exc()
                 finally:
-                    # Stop background wake word listener
+                    # Stop background wake word listener and wait for its mic stream to close
                     _ww_stop.set()
+                    ww_thread.join(timeout=3)
+                    time.sleep(0.5)  # let ALSA fully release the capture device
 
                 # If interrupted, skip idle — go straight to next wake word cycle
                 # which will immediately return True (flag is already set)
