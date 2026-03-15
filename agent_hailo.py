@@ -101,6 +101,7 @@ class BotGUI:
         self.stop_event = threading.Event()
         self.thinking_sound_active = threading.Event()
         self.tts_active = threading.Event()
+        self._interrupted = threading.Event()  # Set when wake word fires during speech
         self.current_state = BotStates.WARMUP
         self.last_state_change = time.time()
         
@@ -353,7 +354,8 @@ class BotGUI:
 
     # --- AUDIO INPUT ---
     def wait_for_wakeword(self, oww):
-        """Block until wake word is heard."""
+        """Block until wake word is heard. Also monitors during SPEAKING state
+        to support mid-speech interruption."""
         CHUNK = 1280
         capture_rate = MIC_SAMPLE_RATE
         target_rate = 16000
@@ -362,32 +364,40 @@ class BotGUI:
         try:
             with sd.InputStream(samplerate=capture_rate, device=MIC_DEVICE_INDEX, channels=1, dtype='int16') as stream:
                 while not self.stop_event.is_set():
+                    # If interrupted during speech, the main loop already knows —
+                    # return immediately so it can start recording
+                    if self._interrupted.is_set():
+                        return True
+
                     data, _ = stream.read(CHUNK * downsample_factor)
                     audio_16k = data[::downsample_factor].flatten()
 
-                    # Feed to model.
-                    # Assuming model name is 'wakeword' if you only loaded that one onnx file
-                    # but openwakeword usually keys predictions by model name.
-                    # Suppress wake word detection while BMO is speaking or
-                    # playing music — the mic picks up BMO's own audio output
-                    if self.current_state in (BotStates.SPEAKING, BotStates.JAMMING):
+                    # Suppress during music and recording (mic is in use)
+                    if self.current_state in (BotStates.JAMMING, BotStates.LISTENING):
                         oww.reset()
                         continue
 
                     oww.predict(audio_16k)
 
-                    # Dynamically find the score so we don't crash on key error
                     for key in oww.prediction_buffer.keys():
                         if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
-                            bmo_print("WAKE", f"Detected: {key}")
+                            # If BMO is speaking, interrupt playback and signal the stream loop
+                            if self.current_state == BotStates.SPEAKING:
+                                bmo_print("WAKE", f"Detected during speech — interrupting!")
+                                self._interrupted.set()
+                                player = get_player()
+                                if player:
+                                    player.stop_playback()
+                            else:
+                                bmo_print("WAKE", f"Detected: {key}")
                             oww.reset()
                             return True
         except Exception as e:
             bmo_print("AUDIO", f"Input Error: {e}")
             self.set_state(BotStates.ERROR)
-            time.sleep(2) # Prevent rapid looping on error
+            time.sleep(2)
             return False
-            
+
         return False
 
     def record_audio(self):
@@ -470,9 +480,14 @@ class BotGUI:
         bmo_print("STT", "Transcribing...")
         return transcribe_audio(filename)
 
-    def speak(self, text, msg="Speaking..."):
+    def speak(self, text, msg="Speaking...", interruptible=True):
         clean_text = clean_text_for_speech(text)
         if not clean_text or not any(c.isalnum() for c in clean_text):
+            return
+
+        # Skip if interrupted (wake word fired during previous sentence)
+        if interruptible and self._interrupted.is_set():
+            bmo_print("TTS", f"Skipped (interrupted): {clean_text[:30]}...")
             return
 
         bmo_print("TTS", f"Speaking: {clean_text[:30]}...")
@@ -646,6 +661,7 @@ class BotGUI:
         while not self.stop_event.is_set():
             # 1. Wait for Wake Word
             if self.wait_for_wakeword(oww):
+                self._interrupted.clear()
                 # 2. Record
                 self.set_state(BotStates.LISTENING, "Listening...")
                 wav_file = self.record_audio()
@@ -695,6 +711,37 @@ class BotGUI:
                         pass
                     self.thinking_audio_process = None
 
+                # Start background wake word listener for mid-speech interruption
+                _ww_stop = threading.Event()
+                def _background_wakeword():
+                    """Listen for wake word during LLM streaming + TTS.
+                    Sets _interrupted and stops playback if detected."""
+                    CHUNK = 1280
+                    ds = MIC_SAMPLE_RATE // 16000
+                    try:
+                        with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX,
+                                            channels=1, dtype='int16') as stream:
+                            while not _ww_stop.is_set() and not self.stop_event.is_set():
+                                data, _ = stream.read(CHUNK * ds)
+                                if self.current_state != BotStates.SPEAKING:
+                                    oww.reset()
+                                    continue
+                                audio_16k = data[::ds].flatten()
+                                oww.predict(audio_16k)
+                                for key in oww.prediction_buffer.keys():
+                                    if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
+                                        bmo_print("WAKE", "Detected during speech — interrupting!")
+                                        self._interrupted.set()
+                                        p = get_player()
+                                        if p:
+                                            p.stop_playback()
+                                        oww.reset()
+                                        return
+                    except Exception:
+                        pass
+                ww_thread = threading.Thread(target=_background_wakeword, daemon=True)
+                ww_thread.start()
+
                 try:
                     full_response = ""
                     image_url = None
@@ -702,9 +749,12 @@ class BotGUI:
                     music_triggered = False
 
                     for chunk in self.brain.stream_think(user_text):
+                        if self._interrupted.is_set():
+                            bmo_print("AGENT", "Speech interrupted by wake word — breaking stream")
+                            break
                         if not chunk.strip():
                             continue
-                            
+
                         full_response += chunk
                         bmo_print("AGENT", f"Chunk received: '{chunk[:80]}'")
                         
@@ -897,6 +947,15 @@ class BotGUI:
                 except Exception as e:
                     bmo_print("ERROR", f"LLM/TTS pipeline: {e}")
                     traceback.print_exc()
+                finally:
+                    # Stop background wake word listener
+                    _ww_stop.set()
+
+                # If interrupted, skip idle — go straight to next wake word cycle
+                # which will immediately return True (flag is already set)
+                if self._interrupted.is_set():
+                    bmo_print("AGENT", "Interrupted — ready for next input")
+                    continue
 
                 self.set_state(BotStates.IDLE, "Ready")
 
