@@ -327,8 +327,12 @@ class BotGUI:
 
         frames = self.animations.get(self.current_state, []) or self.animations.get(BotStates.IDLE, [])
         if frames:
-            # During WARMUP, the boot sequence controls the frame — don't auto-advance
-            if self.current_state != BotStates.WARMUP:
+            if self.current_state == BotStates.WARMUP:
+                # Cycle symbol eye frames (0-5) at 250ms, but don't advance past frame 6
+                # (frames 7+ are controlled by the boot sequence when LLM finishes)
+                if self.current_frame < 6:
+                    self.current_frame = (self.current_frame + 1) % 6
+            else:
                 self.current_frame = (self.current_frame + 1) % len(frames)
             
             # Re-shuffle screensaver sequences when loop completes
@@ -342,7 +346,9 @@ class BotGUI:
         
         # Match web UI animation speeds
         speed = 500
-        if self.current_state == BotStates.SPEAKING:
+        if self.current_state == BotStates.WARMUP:
+            speed = 250  # Fast symbol cycling during boot
+        elif self.current_state == BotStates.SPEAKING:
             speed = 90   # Fix: 90ms for natural lip sync
         elif self.current_state == BotStates.THINKING:
             speed = 500
