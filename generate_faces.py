@@ -498,9 +498,84 @@ def gen_capturing(base_dir="faces/capturing"):
 
         create_face(f"{base_dir}/capturing_{i+1:02d}.png", draw_camera)
 
+def _draw_brain(draw, fill_pct):
+    """Draw a brain/loading indicator at the top of BMO's face.
+    fill_pct: 0.0 to 1.0 — how much of the progress bar is filled."""
+    import math
+    # Progress bar position (centered, above the eyes)
+    bar_y = 120
+    bar_h = 20
+    bar_w = 260
+    bar_left = 399 - bar_w // 2
+    bar_right = 399 + bar_w // 2
+
+    # Background (empty bar)
+    box = [bar_left * SCALE, bar_y * SCALE, bar_right * SCALE, (bar_y + bar_h) * SCALE]
+    draw.rounded_rectangle(box, radius=bar_h // 2 * SCALE, fill=(220, 255, 230), outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
+
+    # Filled portion
+    if fill_pct > 0.02:
+        fill_right = bar_left + int(bar_w * fill_pct)
+        fill_box = [bar_left * SCALE, bar_y * SCALE, fill_right * SCALE, (bar_y + bar_h) * SCALE]
+        fill_color = (41, 131, 57)  # MOUTH_DARK green
+        draw.rounded_rectangle(fill_box, radius=bar_h // 2 * SCALE, fill=fill_color, outline=LINE_COLOR, width=LINE_WIDTH * SCALE)
+
+    # Label above bar
+    label_y = bar_y - 30
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14 * SCALE)
+    except Exception:
+        font = ImageFont.load_default()
+    pct_text = f"{int(fill_pct * 100)}%"
+    draw.text((399 * SCALE, label_y * SCALE), pct_text, fill=LINE_COLOR, font=font, anchor="mt")
+
+
 def gen_warmup(base_dir="faces/warmup"):
+    """Boot sequence: BMO assembles piece by piece.
+    Frames 1-3: empty → brain loading bar appears
+    Frames 4-6: brain fills up (LLM loading ~88% of boot)
+    Frames 7-8: eyes appear (STT loading)
+    Frame 9: mouth appears (wake word ready)
+    Frame 10: full happy face (ready!)
+    """
     ensure_dir(base_dir)
-    create_face(f"{base_dir}/warmup_01.png", lambda d: (draw_regular_eyes(d, 0.5), draw_mouth(d, "straight")))
+
+    # Frame 1: completely empty — just woke up
+    create_face(f"{base_dir}/warmup_01.png", lambda d: None)
+
+    # Frame 2: empty brain bar appears (0%)
+    create_face(f"{base_dir}/warmup_02.png", lambda d: _draw_brain(d, 0.0))
+
+    # Frames 3-6: brain fills (LLM loading — takes ~12s of 14s total)
+    for i, pct in enumerate([0.2, 0.45, 0.65, 0.88], start=3):
+        create_face(f"{base_dir}/warmup_{i:02d}.png", lambda d, p=pct: _draw_brain(d, p))
+
+    # Frame 7: eyes appear (closed) — STT loading
+    def draw_eyes_closed(d):
+        _draw_brain(d, 0.93)
+        draw_regular_eyes(d, 1.0)  # closed eyes
+    create_face(f"{base_dir}/warmup_07.png", draw_eyes_closed)
+
+    # Frame 8: eyes half open + mouth line — wake word loading
+    def draw_eyes_half(d):
+        _draw_brain(d, 0.97)
+        draw_regular_eyes(d, 0.5)
+        draw_mouth(d, "straight")
+    create_face(f"{base_dir}/warmup_08.png", draw_eyes_half)
+
+    # Frame 9: eyes open, full bar — almost ready
+    def draw_almost_ready(d):
+        _draw_brain(d, 1.0)
+        draw_regular_eyes(d, 0.0)
+        draw_mouth(d, "straight")
+    create_face(f"{base_dir}/warmup_09.png", draw_almost_ready)
+
+    # Frame 10: full happy face, no bar — ready!
+    def draw_ready(d):
+        draw_happy_eyes(d)
+        draw_mouth(d, "smile")
+    create_face(f"{base_dir}/warmup_10.png", draw_ready)
 def gen_daydream(base_dir="faces/daydream"):
     """Eyes drift upward with floating thought bubbles — BMO lost in thought"""
     ensure_dir(base_dir)

@@ -622,27 +622,43 @@ class BotGUI:
         boot_start = time.time()
 
         # Initialize persistent audio subsystem (TTS player + Piper synthesizer)
-        self.set_state(BotStates.WARMUP, "Loading Voice...")
+        self.set_state(BotStates.WARMUP, "Booting...")
         t0 = time.time()
         init_audio(ALSA_DEVICE)
         atexit.register(shutdown_audio)
         bmo_print("BOOT", f"Audio subsystem: {time.time()-t0:.2f}s")
 
         # Play a boot sound so the user knows BMO is starting up (~15s total)
-        boot_proc = self.play_sound("boot_sounds")
+        self.play_sound("boot_sounds")
+        # Frame 1-2: empty face → brain bar appears
+        self.current_frame = 1
 
-        # Initialize LLM + STT on the Hailo NPU (direct Python API)
+        # Initialize LLM on the Hailo NPU — this is the big one (~12s)
+        # Advance warmup frames during loading to show progress
         self.set_state(BotStates.WARMUP, "Loading Brain...")
         t0 = time.time()
+
+        def _advance_warmup():
+            """Advance warmup frames 2→6 during LLM load (~12s)."""
+            for frame in range(2, 7):
+                time.sleep(2.2)  # ~12s / 5 frames
+                if self.current_state == BotStates.WARMUP:
+                    self.current_frame = frame
+        warmup_thread = threading.Thread(target=_advance_warmup, daemon=True)
+        warmup_thread.start()
+
         init_llm()
         bmo_print("BOOT", f"LLM (NPU): {time.time()-t0:.2f}s")
 
-        self.set_state(BotStates.WARMUP, "Loading Ear (NPU)...")
+        # Frame 7: eyes appear (closed) — loading ears
+        self.current_frame = 6
+        self.set_state(BotStates.WARMUP, "Loading Ears...")
         t0 = time.time()
         init_stt()
         bmo_print("BOOT", f"STT (NPU): {time.time()-t0:.2f}s")
 
-        # Load Wake Word
+        # Frame 8: eyes half open + mouth — loading wake word
+        self.current_frame = 7
         self.set_state(BotStates.WARMUP, "Loading Wake Word...")
         t0 = time.time()
         try:
@@ -652,6 +668,12 @@ class BotGUI:
             self.set_state(BotStates.ERROR, "Wake Word Error")
             return
         bmo_print("BOOT", f"Wake word (OWW): {time.time()-t0:.2f}s")
+
+        # Frame 9-10: fully assembled → happy face
+        self.current_frame = 8
+        time.sleep(0.5)
+        self.current_frame = 9
+        time.sleep(0.5)
 
         bmo_print("BOOT", f"Total startup: {time.time()-boot_start:.2f}s")
         self.set_state(BotStates.SPEAKING, "Ready!")
