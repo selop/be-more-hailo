@@ -328,10 +328,10 @@ class BotGUI:
         frames = self.animations.get(self.current_state, []) or self.animations.get(BotStates.IDLE, [])
         if frames:
             if self.current_state == BotStates.WARMUP:
-                # Cycle symbol eye frames (0-5) at 250ms, but don't advance past frame 6
-                # (frames 7+ are controlled by the boot sequence when LLM finishes)
-                if self.current_frame < 6:
-                    self.current_frame = (self.current_frame + 1) % 6
+                # Cycle symbol eye frames (0-11) at 1s each, don't advance past frame 12
+                # (frames 12+ are controlled by the boot sequence when LLM finishes)
+                if self.current_frame < 12:
+                    self.current_frame = (self.current_frame + 1) % 12
             else:
                 self.current_frame = (self.current_frame + 1) % len(frames)
             
@@ -347,7 +347,7 @@ class BotGUI:
         # Match web UI animation speeds
         speed = 500
         if self.current_state == BotStates.WARMUP:
-            speed = 250  # Fast symbol cycling during boot
+            speed = 1000  # One symbol rotation per second
         elif self.current_state == BotStates.SPEAKING:
             speed = 90   # Fix: 90ms for natural lip sync
         elif self.current_state == BotStates.THINKING:
@@ -647,26 +647,23 @@ class BotGUI:
         t0 = time.time()
 
         def _advance_warmup():
-            """Advance warmup frames 2→6 during LLM load (~12s)."""
-            for frame in range(2, 7):
-                time.sleep(2.2)  # ~12s / 5 frames
-                if self.current_state == BotStates.WARMUP:
-                    self.current_frame = frame
+            """Let frames auto-cycle during LLM load — no manual advance needed."""
+            pass  # Animation loop handles 0-11 cycling at 1s each
         warmup_thread = threading.Thread(target=_advance_warmup, daemon=True)
         warmup_thread.start()
 
         init_llm()
         bmo_print("BOOT", f"LLM (NPU): {time.time()-t0:.2f}s")
 
-        # Frame 7: eyes appear (closed) — loading ears
-        self.current_frame = 6
+        # Frame 13: eyes closed — loading ears
+        self.current_frame = 12
         self.set_state(BotStates.WARMUP, "Loading Ears...")
         t0 = time.time()
         init_stt()
         bmo_print("BOOT", f"STT (NPU): {time.time()-t0:.2f}s")
 
-        # Frame 8: eyes half open + mouth — loading wake word
-        self.current_frame = 7
+        # Frame 14: eyes half open + mouth — loading wake word
+        self.current_frame = 13
         self.set_state(BotStates.WARMUP, "Loading Wake Word...")
         t0 = time.time()
         try:
@@ -677,10 +674,10 @@ class BotGUI:
             return
         bmo_print("BOOT", f"Wake word (OWW): {time.time()-t0:.2f}s")
 
-        # Frame 9-10: fully assembled → happy face
-        self.current_frame = 8
+        # Frame 15-16: fully assembled → happy face
+        self.current_frame = 14
         time.sleep(0.5)
-        self.current_frame = 9
+        self.current_frame = 15
         time.sleep(0.5)
 
         bmo_print("BOOT", f"Total startup: {time.time()-boot_start:.2f}s")

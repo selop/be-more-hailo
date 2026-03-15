@@ -542,57 +542,73 @@ def _draw_symbol_eyes(draw, left_sym, right_sym):
     draw.text((RIGHT_EYE_X * SCALE, EYE_VISUAL_Y * SCALE), right_sym, fill=LINE_COLOR, font=font, anchor="mm")
 
 
+def _draw_sliding_mouth(draw, offset):
+    """Draw a straight mouth line shifted horizontally by offset pixels."""
+    cx = 399 + offset
+    m_left = cx - MOUTH_W // 2
+    m_right = cx + MOUTH_W // 2
+    draw_line(draw, m_left, MOUTH_Y, m_right, MOUTH_Y)
+
+
 def gen_warmup(base_dir="faces/warmup"):
-    """Boot sequence: scrambled symbol eyes + progress bar throughout.
-    Frames 1-6: symbol eyes cycle through ($,%,@,*,+,#) with bar filling (LLM)
-    Frame 7: eyes blink closed (STT loading)
-    Frame 8: eyes half open + mouth (wake word loading)
-    Frame 9: eyes open, bar full
-    Frame 10: happy face, no bar (ready!)
+    """Boot sequence: symbol eyes rotate each second, mouth slides side to side.
+    Frames 1-12: symbol eyes + sliding mouth + progress bar (LLM, ~1s per frame)
+    Frame 13: eyes closed (STT loading)
+    Frame 14: eyes half open + mouth (wake word loading)
+    Frame 15: eyes open, bar full
+    Frame 16: happy face, no bar (ready!)
     """
     ensure_dir(base_dir)
 
-    # Symbol pairs for the scrambled "booting" eyes
-    symbol_pairs = [
-        ("$", "%"), ("@", "*"), ("+", "#"),
-        ("*", "$"), ("#", "@"), ("%", "+"),
-    ]
+    # Clean out old frames
+    import glob
+    for f in glob.glob(f"{base_dir}/warmup_*.png"):
+        os.remove(f)
 
-    # Frames 1-6: scrambled eyes + progress bar filling (LLM loading ~88%)
-    for i, (pct, (ls, rs)) in enumerate(zip(
-        [0.0, 0.15, 0.35, 0.55, 0.75, 0.88],
-        symbol_pairs,
-    ), start=1):
-        def draw_boot(d, p=pct, l=ls, r=rs):
+    # 12 symbol pairs — one per second during ~12s LLM load
+    symbols = ["$", "%", "@", "*", "+", "#", "?", "!", "&", "~", "^", ">"]
+    # Mouth slides: left → center → right → center (ping-pong)
+    mouth_offsets = [-25, -15, 0, 15, 25, 15, 0, -15, -25, -15, 0, 15]
+
+    # Frames 1-12: symbol eyes + sliding mouth + progress bar filling
+    for i in range(12):
+        pct = i / 12.0 * 0.88  # 0% → 88% over 12 frames
+        ls = symbols[i]
+        rs = symbols[(i + 3) % len(symbols)]  # offset right eye for variety
+        mx = mouth_offsets[i]
+
+        def draw_boot(d, p=pct, l=ls, r=rs, m=mx):
             _draw_brain(d, p)
             _draw_symbol_eyes(d, l, r)
-        create_face(f"{base_dir}/warmup_{i:02d}.png", draw_boot)
+            _draw_sliding_mouth(d, m)
+        create_face(f"{base_dir}/warmup_{i+1:02d}.png", draw_boot)
 
-    # Frame 7: eyes closed (STT loading — ears coming online)
+    # Frame 13: eyes closed (STT loading — ears coming online)
     def draw_ears_loading(d):
         _draw_brain(d, 0.93)
         draw_regular_eyes(d, 1.0)
-    create_face(f"{base_dir}/warmup_07.png", draw_ears_loading)
+        draw_mouth(d, "straight")
+    create_face(f"{base_dir}/warmup_13.png", draw_ears_loading)
 
-    # Frame 8: eyes half open + mouth (wake word loading)
+    # Frame 14: eyes half open (wake word loading)
     def draw_wakeword_loading(d):
         _draw_brain(d, 0.97)
         draw_regular_eyes(d, 0.5)
         draw_mouth(d, "straight")
-    create_face(f"{base_dir}/warmup_08.png", draw_wakeword_loading)
+    create_face(f"{base_dir}/warmup_14.png", draw_wakeword_loading)
 
-    # Frame 9: eyes open, bar full — almost ready
+    # Frame 15: eyes open, bar full — almost ready
     def draw_almost_ready(d):
         _draw_brain(d, 1.0)
         draw_regular_eyes(d, 0.0)
         draw_mouth(d, "straight")
-    create_face(f"{base_dir}/warmup_09.png", draw_almost_ready)
+    create_face(f"{base_dir}/warmup_15.png", draw_almost_ready)
 
-    # Frame 10: happy face, no bar — ready!
+    # Frame 16: happy face, no bar — ready!
     def draw_ready(d):
         draw_happy_eyes(d)
         draw_mouth(d, "smile")
-    create_face(f"{base_dir}/warmup_10.png", draw_ready)
+    create_face(f"{base_dir}/warmup_16.png", draw_ready)
 def gen_daydream(base_dir="faces/daydream"):
     """Eyes drift upward with floating thought bubbles — BMO lost in thought"""
     ensure_dir(base_dir)
