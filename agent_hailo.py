@@ -35,7 +35,7 @@ from openwakeword.model import Model
 # Import unified core modules
 from core.llm import Brain, init_llm, is_llm_ready, _get_llm
 from core.tts import play_audio_on_hardware, init_audio, shutdown_audio, get_player, get_synthesizer, clean_text_for_speech
-from core.stt import transcribe_audio
+from core.stt import transcribe_audio, init_stt
 from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, SILENCE_THRESHOLD, t
 from core.meter import MicMeter
 from core.bubble import ThoughtBubble
@@ -228,6 +228,7 @@ class BotGUI:
             "greeting_sounds": [],
             "ack_sounds": [],
             "thinking_sounds": [],
+            "analyzing_sounds": [],
             "camera_sounds": [],
             "music": []
         }
@@ -603,9 +604,11 @@ class BotGUI:
         init_audio(ALSA_DEVICE)
         atexit.register(shutdown_audio)
 
-        # Initialize LLM on the Hailo NPU (direct Python API, no hailo-ollama)
+        # Initialize LLM + STT on the Hailo NPU (direct Python API)
         self.set_state(BotStates.WARMUP, "Loading Brain...")
         init_llm()
+        self.set_state(BotStates.WARMUP, "Loading Ear (NPU)...")
+        init_stt()
 
         # Load Wake Word
         self.set_state(BotStates.WARMUP, "Loading Ear...")
@@ -752,6 +755,13 @@ class BotGUI:
                             self.speak(chunk)
 
                     if taking_photo:
+                        # Kill any thinking audio from the STT phase before camera UX
+                        if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
+                            try:
+                                self.thinking_audio_process.terminate()
+                            except Exception:
+                                pass
+                            self.thinking_audio_process = None
                         # Clear transcription bubble so it doesn't clip the camera face
                         self.bubble.hide()
                         # --- Camera UX: animated face + spoken intro + shutter ---
@@ -774,7 +784,22 @@ class BotGUI:
                             with open('temp.jpg', 'rb') as img_file:
                                 b64_string = base64.b64encode(img_file.read()).decode('utf-8')
                             self.set_state(BotStates.THINKING, "Analyzing...")
-                            threading.Thread(target=play_thinking_sequence, daemon=True).start()
+
+                            def play_analyzing_sequence():
+                                # Play one analyzing intro, then loop thinking sounds as filler
+                                proc = self.play_sound("analyzing_sounds")
+                                if proc:
+                                    proc.wait()
+                                while self.current_state == BotStates.THINKING:
+                                    self.thinking_audio_process = self.play_sound("thinking_sounds")
+                                    if self.thinking_audio_process:
+                                        self.thinking_audio_process.wait()
+                                    for _ in range(80):
+                                        if self.current_state != BotStates.THINKING:
+                                            break
+                                        time.sleep(0.1)
+
+                            threading.Thread(target=play_analyzing_sequence, daemon=True).start()
                             response = self.brain.analyze_image(b64_string, user_text)
                             if hasattr(self, 'thinking_audio_process') and self.thinking_audio_process:
                                 try:

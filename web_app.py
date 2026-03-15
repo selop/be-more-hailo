@@ -15,7 +15,7 @@ import subprocess
 # Import our new unified core modules
 from core.llm import Brain, init_llm, is_llm_ready
 from core.tts import play_audio_on_hardware, generate_audio_file, add_pronunciation, load_pronunciations, clean_text_for_speech
-from core.stt import transcribe_audio
+from core.stt import transcribe_audio, init_stt
 from core.config import WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD
 from core.log import setup_logging
 
@@ -59,6 +59,7 @@ def _cleanup_old_audio():
 async def startup_init():
     _cleanup_old_audio()
     init_llm()
+    init_stt()
 
 # Mount static files (for CSS, JS, images, and audio)
 app.mount("/static", StaticFiles(directory="static"), name="static")

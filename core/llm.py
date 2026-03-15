@@ -14,8 +14,10 @@ from .log import bmo_print
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
-#  VDevice + LLM singleton (main process only — VLM runs in a child process
-#  with its own VDevice since the NPU can't hold both models simultaneously)
+#  VDevice + LLM + STT singletons (main process — shared VDevice)
+#  VLM runs in a child process with its own VDevice since the NPU can't hold
+#  both large generative models (LLM 1.5B + VLM 2B) simultaneously.
+#  Whisper (125MB) is small enough to coexist with LLM on the shared VDevice.
 # --------------------------------------------------------------------------- #
 _vdevice = None
 _llm_instance = None
@@ -32,15 +34,18 @@ def _resolve_hef(hef_path: str) -> str:
 
 
 def _get_vdevice():
-    """Return the VDevice singleton, creating it on first call."""
+    """Return the shared VDevice singleton, creating it on first call.
+    Uses group_id='SHARED' so LLM + Speech2Text can coexist on the NPU."""
     global _vdevice
     if _vdevice is not None:
         return _vdevice
 
     from hailo_platform import VDevice
 
-    _vdevice = VDevice()
-    logger.info("VDevice initialised")
+    params = VDevice.create_params()
+    params.group_id = "SHARED"
+    _vdevice = VDevice(params)
+    logger.info("VDevice initialised (group_id=SHARED)")
     return _vdevice
 
 
@@ -62,8 +67,11 @@ def _get_llm():
 
 
 def _release_llm():
-    """Release LLM + VDevice to free the NPU for VLM subprocess."""
+    """Release STT + LLM + VDevice to free the NPU for VLM subprocess."""
     global _llm_instance, _vdevice
+    # Release STT first (it shares the VDevice)
+    from .stt import release_stt
+    release_stt()
     if _llm_instance is not None:
         try:
             _llm_instance.release()
@@ -76,7 +84,7 @@ def _release_llm():
         except Exception as e:
             logger.warning(f"Error releasing VDevice: {e}")
         _vdevice = None
-    logger.info("LLM + VDevice released for VLM subprocess")
+    logger.info("STT + LLM + VDevice released for VLM subprocess")
 
 
 def init_llm():
@@ -135,9 +143,13 @@ _CAMERA_TRIGGER_PHRASES = [
 
 def _vlm_question(user_text: str) -> str:
     """Convert camera-trigger phrases into an actual VLM question."""
-    if not user_text or user_text.lower().strip().rstrip(".!?") in [
-        p.rstrip(".!?") for p in _CAMERA_TRIGGER_PHRASES
-    ]:
+    if not user_text:
+        return "What do you see in this image? Describe it briefly."
+    lower = user_text.lower()
+    # If the text is just a camera trigger (or dominated by one), ask for a description
+    if any(lower.strip().rstrip(".!?") == p for p in _CAMERA_TRIGGER_PHRASES) or \
+       any(lower.startswith(p) for p in ["take a photo", "take a picture", "take photo",
+                                          "take picture", "snap a photo", "photograph"]):
         return "What do you see in this image? Describe it briefly."
     return user_text
 
@@ -639,8 +651,10 @@ class Brain:
             logger.error(f"VLM Exception: {e}", exc_info=True)
             return "I tried to look, but my eyes aren't working right now."
         finally:
-            # Reload LLM + re-cache system prompt so text inference is ready again
+            # Reload LLM + STT + re-cache system prompt so inference is ready again
             global _system_context
-            logger.info("Reloading LLM after VLM subprocess ...")
+            logger.info("Reloading LLM + STT after VLM subprocess ...")
             _system_context = None
             init_llm()
+            from .stt import init_stt
+            init_stt()

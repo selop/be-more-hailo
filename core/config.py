@@ -92,7 +92,10 @@ PIPER_LENGTH_SCALE = {"en": 1.0, "de": 1.4}.get(LANGUAGE, 1.0)
 # Run 'aplay -l' to check your device names if this changes.
 ALSA_DEVICE = os.environ.get("ALSA_DEVICE", "plughw:UACDemoV10,0")
 
-# STT Settings (CPU whisper.cpp)
+# STT Settings
+# NPU Speech2Text (preferred — 7x faster than CPU whisper.cpp)
+WHISPER_HEF_PATH = os.environ.get("WHISPER_HEF_PATH", "./models/Whisper-Base.hef")
+# CPU fallback (whisper.cpp subprocess)
 WHISPER_CMD = "./whisper.cpp/build/bin/whisper-cli"
 WHISPER_MODELS = {
     "en": "./models/ggml-base.en.bin",
