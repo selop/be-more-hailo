@@ -34,9 +34,9 @@ from openwakeword.model import Model
 
 # Import unified core modules
 from core.llm import Brain
-from core.tts import play_audio_on_hardware
+from core.tts import play_audio_on_hardware, init_audio, shutdown_audio, get_player, get_synthesizer, clean_text_for_speech
 from core.stt import transcribe_audio
-from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, t
+from core.config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_MODEL, WAKE_WORD_THRESHOLD, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, SILENCE_THRESHOLD, t
 from core.meter import MicMeter
 from core.bubble import ThoughtBubble
 from core.log import bmo_print, setup_logging
@@ -186,8 +186,13 @@ class BotGUI:
         self.is_muted = not self.is_muted
         if self.is_muted:
             self.mute_label.place(relx=0.95, rely=0.05, anchor=tk.NE)
+            # Stop persistent TTS player immediately
+            player = get_player()
+            if player:
+                player.stop_playback()
+                bmo_print("MUTE", "Stopped persistent audio player.")
             try:
-                # Kill any hardware audio playing via aplay immediately
+                # Kill any hardware audio playing via aplay (sound effects)
                 subprocess.run(["killall", "-9", "aplay"], capture_output=True)
                 bmo_print("MUTE", "Killed aplay process.")
             except Exception as e:
@@ -243,6 +248,7 @@ class BotGUI:
         if not sounds:
             return None
         sound_file = random.choice(sounds)
+        bmo_print("AUDIO", f"Playing {category}: {os.path.basename(sound_file)}")
         try:
             return subprocess.Popen(['aplay', '-D', ALSA_DEVICE, '-q', sound_file])
         except Exception as e:
@@ -349,19 +355,14 @@ class BotGUI:
     def wait_for_wakeword(self, oww):
         """Block until wake word is heard."""
         CHUNK = 1280
-        # If openwakeword expects 16k, we must capture higher and downsample if needed
-        # But let's try capturing at 16k directly first if the HW supports it, 
-        # otherwise capture 48k and decimate.
-        
-        capture_rate = MIC_SAMPLE_RATE # 48000
+        capture_rate = MIC_SAMPLE_RATE
         target_rate = 16000
         downsample_factor = capture_rate // target_rate
-        
+
         try:
             with sd.InputStream(samplerate=capture_rate, device=MIC_DEVICE_INDEX, channels=1, dtype='int16') as stream:
                 while not self.stop_event.is_set():
                     data, _ = stream.read(CHUNK * downsample_factor)
-                    # Simple integer decimation for 48k -> 16k
                     audio_16k = data[::downsample_factor].flatten()
 
                     # Feed to model.
@@ -396,12 +397,12 @@ class BotGUI:
             vol = np.linalg.norm(indata) * 10
             self.meter.feed(vol)
             frames.append(indata.copy())
-            if vol < 50000: # Silence threshold
+            if vol < SILENCE_THRESHOLD:
                 silent_chunks += 1
             else:
                 silent_chunks = 0
                 has_spoken = True
-            
+
         try:
             record_start = time.time()
             with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16', callback=callback):
@@ -464,24 +465,21 @@ class BotGUI:
         return transcribe_audio(filename)
 
     def speak(self, text, msg="Speaking..."):
-        from core.tts import clean_text_for_speech
-        from core.config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE
-        
         clean_text = clean_text_for_speech(text)
         if not clean_text or not any(c.isalnum() for c in clean_text):
             return
-            
+
         bmo_print("TTS", f"Speaking: {clean_text[:30]}...")
         try:
-            safe_text = clean_text.replace("'", "'\\''")
-            
+            synth = get_synthesizer()
+            player = get_player()
+
             # 1. Synthesize audio first. (Runs silently, mouth stays idle/thinking)
-            piper_cmd = f"echo '{safe_text}' | {PIPER_CMD} --model {PIPER_MODEL} --length-scale {PIPER_LENGTH_SCALE} --output_raw"
-            res = subprocess.run(piper_cmd, shell=True, capture_output=True)
-            if res.returncode != 0:
-                bmo_print("TTS", f"Piper error: {res.stderr}")
+            pcm = synth.synthesize(clean_text)
+            if not pcm:
+                bmo_print("TTS", "Piper returned no audio")
                 return
-            
+
             # 2. Audio is ready! Set SPEAKING state so mouth starts moving.
             if msg is not None:
                 self.set_state(BotStates.SPEAKING, msg)
@@ -489,15 +487,15 @@ class BotGUI:
                 self.current_state = BotStates.SPEAKING
                 self.current_frame = 0
                 self.last_state_change = time.time()
-            
-            # 3. Play the generated audio bytes
+
+            # 3. Play through persistent stream
             if not self.is_muted:
-                aplay_cmd = ["aplay", "-D", ALSA_DEVICE, "-r", "22050", "-f", "S16_LE", "-t", "raw"]
-                subprocess.run(aplay_cmd, input=res.stdout)
+                player.resume()
+                player.play(pcm)
             else:
                 # If muted, just hold the speaking pose for a moment to simulate talking
                 time.sleep(1.5)
-            
+
             # 4. Enforce an immediate IDLE state and a short visual breath pause
             # This ensures the mouth closes definitively before the next sentence chunk arrives,
             # unless a background thread (like play_music) has already hijacked the state to JAMMING
@@ -509,7 +507,7 @@ class BotGUI:
                     self.current_frame = 0
                     self.last_state_change = time.time()
                 time.sleep(0.3)
-            
+
         except Exception as e:
             bmo_print("TTS", f"Hardware error: {e}")
 
@@ -529,7 +527,7 @@ class BotGUI:
         silent_chunks = 0
         has_spoken = False
         max_vol_seen = 0.0                        
-        ignore_until = time.time() + 0.2          # ignore first 0.2s for ALSA buffer clear
+        ignore_until = time.time() + 1.0          # ignore first 1s to let BMO's own TTS echo die down
         deadline = time.time() + timeout_sec       # give up if no speech by here
         max_deadline = time.time() + timeout_sec + 8  # hard cap regardless
 
@@ -542,7 +540,7 @@ class BotGUI:
             max_vol_seen = max(max_vol_seen, vol)
 
             frames.append(indata.copy())
-            if vol < 50000:  # Matching main record_audio silence threshold
+            if vol < SILENCE_THRESHOLD:
                 silent_chunks += 1
             else:
                 silent_chunks = 0
@@ -559,7 +557,7 @@ class BotGUI:
                         break
                     # No speech in the listen window — give up quietly
                     if now > deadline and not has_spoken:
-                        bmo_print("FOLLOW-UP", f"Timeout. Max mic volume: {max_vol_seen:.2f} (threshold 50000)")
+                        bmo_print("FOLLOW-UP", f"Timeout. Max mic volume: {max_vol_seen:.2f} (threshold {SILENCE_THRESHOLD})")
                         return None
                     # Hard cap — break out and attempt transcription rather than discarding!
                     if now > max_deadline:
@@ -599,7 +597,12 @@ class BotGUI:
     # --- MAIN LOOP ---
     def main_loop(self):
         time.sleep(1) # Let UI settle
-        
+
+        # Initialize persistent audio subsystem (TTS player + Piper synthesizer)
+        self.set_state(BotStates.WARMUP, "Loading Voice...")
+        init_audio(ALSA_DEVICE)
+        atexit.register(shutdown_audio)
+
         # Load Wake Word
         self.set_state(BotStates.WARMUP, "Loading Ear...")
         try:
