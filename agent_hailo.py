@@ -886,15 +886,13 @@ class BotGUI:
                             self.set_state(BotStates.THINKING, "Analyzing...")
 
                             def play_analyzing_sequence():
-                                # Play one analyzing intro, then loop thinking sounds as filler
-                                proc = self.play_sound("analyzing_sounds")
-                                if proc:
-                                    proc.wait()
+                                # Loop analyzing sounds only — no thinking sounds during image analysis
                                 while self.current_state == BotStates.THINKING:
-                                    self.thinking_audio_process = self.play_sound("thinking_sounds")
+                                    self.thinking_audio_process = self.play_sound("analyzing_sounds")
                                     if self.thinking_audio_process:
                                         self.thinking_audio_process.wait()
-                                    for _ in range(80):
+                                    # Pause between clips
+                                    for _ in range(50):
                                         if self.current_state != BotStates.THINKING:
                                             break
                                         time.sleep(0.1)
