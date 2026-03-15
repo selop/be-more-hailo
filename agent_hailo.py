@@ -582,16 +582,20 @@ class BotGUI:
     # --- MAIN LOOP ---
     def main_loop(self):
         time.sleep(1) # Let UI settle
-        
+        boot_start = time.time()
+
         # Load Wake Word
         self.set_state(BotStates.WARMUP, "Loading Ear...")
+        t0 = time.time()
         try:
             oww = Model(wakeword_model_paths=[WAKE_WORD_MODEL])
         except Exception as e:
             bmo_print("WAKE", f"Failed to load model: {e}")
             self.set_state(BotStates.ERROR, "Wake Word Error")
             return
+        bmo_print("BOOT", f"Wake word (OWW): {time.time()-t0:.2f}s")
 
+        bmo_print("BOOT", f"Total startup: {time.time()-boot_start:.2f}s")
         self.set_state(BotStates.SPEAKING, "Ready!")
         greeting_proc = self.play_sound("greeting_sounds")
         if greeting_proc:
