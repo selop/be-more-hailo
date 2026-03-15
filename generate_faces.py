@@ -531,47 +531,64 @@ def _draw_brain(draw, fill_pct):
     draw.text((399 * SCALE, label_y * SCALE), pct_text, fill=LINE_COLOR, font=font, anchor="mt")
 
 
+def _draw_symbol_eyes(draw, left_sym, right_sym):
+    """Draw text symbols as eyes (scrambled boot characters)."""
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", 38 * SCALE)
+    except Exception:
+        font = ImageFont.load_default()
+    draw.text((LEFT_EYE_X * SCALE, EYE_VISUAL_Y * SCALE), left_sym, fill=LINE_COLOR, font=font, anchor="mm")
+    draw.text((RIGHT_EYE_X * SCALE, EYE_VISUAL_Y * SCALE), right_sym, fill=LINE_COLOR, font=font, anchor="mm")
+
+
 def gen_warmup(base_dir="faces/warmup"):
-    """Boot sequence: BMO assembles piece by piece.
-    Frames 1-3: empty → brain loading bar appears
-    Frames 4-6: brain fills up (LLM loading ~88% of boot)
-    Frames 7-8: eyes appear (STT loading)
-    Frame 9: mouth appears (wake word ready)
-    Frame 10: full happy face (ready!)
+    """Boot sequence: scrambled symbol eyes + progress bar throughout.
+    Frames 1-6: symbol eyes cycle through ($,%,@,*,+,#) with bar filling (LLM)
+    Frame 7: eyes blink closed (STT loading)
+    Frame 8: eyes half open + mouth (wake word loading)
+    Frame 9: eyes open, bar full
+    Frame 10: happy face, no bar (ready!)
     """
     ensure_dir(base_dir)
 
-    # Frame 1: completely empty — just woke up
-    create_face(f"{base_dir}/warmup_01.png", lambda d: None)
+    # Symbol pairs for the scrambled "booting" eyes
+    symbol_pairs = [
+        ("$", "%"), ("@", "*"), ("+", "#"),
+        ("*", "$"), ("#", "@"), ("%", "+"),
+    ]
 
-    # Frame 2: empty brain bar appears (0%)
-    create_face(f"{base_dir}/warmup_02.png", lambda d: _draw_brain(d, 0.0))
+    # Frames 1-6: scrambled eyes + progress bar filling (LLM loading ~88%)
+    for i, (pct, (ls, rs)) in enumerate(zip(
+        [0.0, 0.15, 0.35, 0.55, 0.75, 0.88],
+        symbol_pairs,
+    ), start=1):
+        def draw_boot(d, p=pct, l=ls, r=rs):
+            _draw_brain(d, p)
+            _draw_symbol_eyes(d, l, r)
+        create_face(f"{base_dir}/warmup_{i:02d}.png", draw_boot)
 
-    # Frames 3-6: brain fills (LLM loading — takes ~12s of 14s total)
-    for i, pct in enumerate([0.2, 0.45, 0.65, 0.88], start=3):
-        create_face(f"{base_dir}/warmup_{i:02d}.png", lambda d, p=pct: _draw_brain(d, p))
-
-    # Frame 7: eyes appear (closed) — STT loading
-    def draw_eyes_closed(d):
+    # Frame 7: eyes closed (STT loading — ears coming online)
+    def draw_ears_loading(d):
         _draw_brain(d, 0.93)
-        draw_regular_eyes(d, 1.0)  # closed eyes
-    create_face(f"{base_dir}/warmup_07.png", draw_eyes_closed)
+        draw_regular_eyes(d, 1.0)
+    create_face(f"{base_dir}/warmup_07.png", draw_ears_loading)
 
-    # Frame 8: eyes half open + mouth line — wake word loading
-    def draw_eyes_half(d):
+    # Frame 8: eyes half open + mouth (wake word loading)
+    def draw_wakeword_loading(d):
         _draw_brain(d, 0.97)
         draw_regular_eyes(d, 0.5)
         draw_mouth(d, "straight")
-    create_face(f"{base_dir}/warmup_08.png", draw_eyes_half)
+    create_face(f"{base_dir}/warmup_08.png", draw_wakeword_loading)
 
-    # Frame 9: eyes open, full bar — almost ready
+    # Frame 9: eyes open, bar full — almost ready
     def draw_almost_ready(d):
         _draw_brain(d, 1.0)
         draw_regular_eyes(d, 0.0)
         draw_mouth(d, "straight")
     create_face(f"{base_dir}/warmup_09.png", draw_almost_ready)
 
-    # Frame 10: full happy face, no bar — ready!
+    # Frame 10: happy face, no bar — ready!
     def draw_ready(d):
         draw_happy_eyes(d)
         draw_mouth(d, "smile")
