@@ -193,7 +193,14 @@ with vlm.generate(prompt=prompt, frames=[numpy_image], max_generated_tokens=200)
 
 ### NPU Model Concurrency
 
-The Hailo-10H has limited on-device memory. Smaller model pairs (e.g. Whisper + LLM) can share a VDevice via `group_id="SHARED"`:
+**HailoRT 5.1.1 only allows one generative model (`LLM` or `VLM`) at a time per VDevice.** This is a software limitation in the genai runtime, not a hardware memory constraint — the Hailo-10H has 8GB RAM, and the combined models (LLM 2.3GB + VLM 2.3GB = 4.6GB) would fit. Testing confirmed:
+
+- LLM then VLM → `HAILO_INTERNAL_FAILURE(8)` ❌
+- VLM then LLM → same error ❌
+- Two copies of the same LLM → same error ❌
+- LLM + Speech2Text (Whisper) → works ✅ (Speech2Text is a different pipeline class, not a generative model)
+
+`Speech2Text` can coexist with `LLM` on a shared VDevice via `group_id="SHARED"`:
 
 ```python
 from hailo_platform import VDevice
@@ -202,12 +209,18 @@ params = VDevice.create_params()
 params.group_id = "SHARED"
 vdevice = VDevice(params)
 
-# Both models share the same NPU device
+# Speech2Text + LLM share the same NPU device
 speech2text = Speech2Text(vdevice, whisper_hef)
 llm = LLM(vdevice, llm_hef)
 ```
 
-Larger model pairs (e.g. LLM 1.5B + VLM 2B) **cannot coexist** — use sequential access with separate VDevices (BMO uses a child process for VLM).
+For LLM + VLM: BMO uses a child process swap (release LLM → fork → VLM in child → child exits → reload LLM). This may be resolved in HailoRT >= 5.2.0.
+
+**Note on hailo-ollama**: hailo-ollama is a precompiled binary that bypasses the device manager entirely and requires exclusive device access ([source](https://github.com/gregm123456/raspberry_pi_hailo_ai_services)). It cannot share the NPU with any other model. This is why BMO migrated to the direct Python API in Tier 2.
+
+### Future: Unified Multimodal Model
+
+The ideal solution is a single multimodal HEF (e.g. Gemma 3 4B-IT with vision, or a unified Qwen2.5-VL) that handles both text and image input. This would eliminate the subprocess swap entirely — camera responses would drop from ~20-30s to ~3-5s. As of March 2026, Hailo's model zoo only ships LLM and VLM as separate HEFs. Watch for multimodal models in future HailoRT releases.
 
 ---
 
