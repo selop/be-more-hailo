@@ -22,7 +22,7 @@ def init_stt():
         return
 
     try:
-        from .llm import _get_vdevice, _resolve_hef
+        from .npu import _get_vdevice, _resolve_hef
         from hailo_platform.genai import Speech2Text
 
         hef = _resolve_hef(WHISPER_HEF_PATH)

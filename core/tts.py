@@ -279,18 +279,12 @@ class PiperSynthesizer:
         return self._synthesize_subprocess(text)
 
     def _synthesize_library(self, text: str) -> bytes:
-        """Use piper-tts Python library."""
-        import io
-        import wave as wave_mod
+        """Use piper-tts Python library (v1.4+ API)."""
+        from piper.config import SynthesisConfig
 
-        audio_buf = io.BytesIO()
-        with wave_mod.open(audio_buf, 'wb') as wf:
-            self._piper_voice.synthesize(text, wf, length_scale=PIPER_LENGTH_SCALE)
-
-        # Extract raw PCM from the WAV (skip header)
-        audio_buf.seek(0)
-        with wave_mod.open(audio_buf, 'rb') as wf:
-            return wf.readframes(wf.getnframes())
+        cfg = SynthesisConfig(length_scale=PIPER_LENGTH_SCALE)
+        chunks = self._piper_voice.synthesize(text, syn_config=cfg)
+        return b"".join(chunk.audio_int16_bytes for chunk in chunks)
 
     def _synthesize_subprocess(self, text: str) -> bytes:
         """Fall back to Piper CLI subprocess (still eliminates aplay)."""

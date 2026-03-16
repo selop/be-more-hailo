@@ -344,6 +344,19 @@ wget -O models/Qwen2-VL-2B-Instruct.hef \
     "https://dev-public.hailo.ai/v${HAILORT_VER}/blob/Qwen2-VL-2B-Instruct.hef"
 ```
 
+**Bluetooth speaker not detected by BMO**
+
+If you're using a Bluetooth speaker instead of the USB `UACDemoV10`, you need the PipeWire ALSA bridge so that `sounddevice` (which uses ALSA/PortAudio) can route audio through PipeWire to your Bluetooth device:
+```bash
+sudo apt install -y pipewire-alsa
+```
+After installing, verify the speaker shows up:
+```bash
+source venv/bin/activate
+python3 -c "import sounddevice; print(sounddevice.query_devices())"
+```
+You should see `pipewire` and `default` entries with output channels. Set `ALSA_DEVICE=default` in your environment or `core/config.py` if BMO doesn't pick it up automatically.
+
 **Camera vision says "my eyes aren't working"**
 
 If the VLM HEF is present but inference still fails, check that `hailo_platform` is importable:

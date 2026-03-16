@@ -28,7 +28,7 @@ from core.llm import Brain, init_llm, is_llm_ready, _get_llm
 from core.npu import _release_llm, reload_after_vlm
 from core.tts import init_audio, shutdown_audio, get_player, get_synthesizer, clean_text_for_speech
 from core.stt import transcribe_audio, init_stt
-from core.config import WAKE_WORD_MODEL, ALSA_DEVICE, FOLLOWUP_ENABLED, t
+from core.config import WAKE_WORD_MODEL, ALSA_DEVICE, FOLLOWUP_ENABLED, LANGUAGE, t
 from core.audio_input import wait_for_wakeword, record_until_silence
 from core.dispatch import dispatch_stream
 from core.screensaver import screensaver_loop

@@ -86,7 +86,8 @@ PIPER_LENGTH_SCALE = {"en": 1.0, "de": 1.4}.get(LANGUAGE, 1.0)
 #   card 3: Device     -> microphone/capture input (held by sounddevice while agent runs)
 # Use the playback card (UACDemoV10) so aplay doesn't conflict with the mic stream.
 # Run 'aplay -l' to check your device names if this changes.
-ALSA_DEVICE = os.environ.get("ALSA_DEVICE", "plughw:UACDemoV10,0")
+# ALSA_DEVICE = os.environ.get("ALSA_DEVICE", "plughw:UACDemoV10,0")
+ALSA_DEVICE = os.environ.get("ALSA_DEVICE", "default")
 
 # STT Settings
 # NPU Speech2Text (preferred — 7x faster than CPU whisper.cpp)
