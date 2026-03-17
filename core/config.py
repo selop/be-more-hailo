@@ -129,7 +129,14 @@ MIC_DEVICE_INDEX = int(os.environ.get("MIC_DEVICE_INDEX", "1"))
 MIC_SAMPLE_RATE = 48000
 WAKE_WORD_MODEL = "./wakeword.onnx"
 WAKE_WORD_THRESHOLD = 0.35
-SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
+SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))  # deprecated: kept for backward compat
+
+# Improved silence detection (RMS-based, adaptive)
+SILENCE_RMS_THRESHOLD = int(os.environ.get("SILENCE_RMS_THRESHOLD", "300"))
+NOISE_FLOOR_MULTIPLIER = float(os.environ.get("NOISE_FLOOR_MULTIPLIER", "3.0"))
+MIN_SPEECH_CHUNKS = int(os.environ.get("MIN_SPEECH_CHUNKS", "3"))
+# (speech_duration_seconds, required_silence_seconds)
+SILENCE_TIERS = [(1.0, 1.5), (5.0, 2.2), (float('inf'), 2.8)]
 
 # UI Settings
 MIC_METER_ENABLED = True  # Show mic gain meter overlay during listening

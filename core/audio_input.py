@@ -11,7 +11,10 @@ import logging
 import numpy as np
 import sounddevice as sd
 
-from .config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_THRESHOLD, SILENCE_THRESHOLD
+from .config import (
+    MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_THRESHOLD,
+    SILENCE_RMS_THRESHOLD, NOISE_FLOOR_MULTIPLIER, MIN_SPEECH_CHUNKS, SILENCE_TIERS,
+)
 from .log import bmo_print
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,14 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
     return False
 
 
+def _silence_timeout_for_duration(speech_duration):
+    """Return the required silence duration (seconds) based on how long the user has spoken."""
+    for max_dur, silence_sec in SILENCE_TIERS:
+        if speech_duration < max_dur:
+            return silence_sec
+    return SILENCE_TIERS[-1][1]
+
+
 def record_until_silence(
     stop_event,
     meter_cb=None,
@@ -88,9 +99,9 @@ def record_until_silence(
         Hard maximum recording time.
     silence_chunks_no_speech : int
         How many consecutive silent chunks to wait before giving up if no
-        speech was ever detected.
+        speech was ever detected.  (Legacy parameter — kept for API compat.)
     silence_chunks_after_speech : int
-        How many consecutive silent chunks to wait after speech was detected.
+        Legacy parameter — silence timeout is now tier-based.
     ignore_sec : float
         Seconds at the start during which audio is completely ignored
         (used by follow-up recording to let BMO's own TTS echo die down).
@@ -99,24 +110,55 @@ def record_until_silence(
     """
     frames = []
     silent_chunks = 0
+    speech_chunks = 0
     has_spoken = False
     max_vol_seen = 0.0
+    noise_floor = float(SILENCE_RMS_THRESHOLD)
+    speech_start_time = None
     ignore_until = time.time() + ignore_sec
 
+    # Approximate chunk duration — sounddevice default blocksize is ~2048 samples
+    # at 48 kHz ≈ 42.7 ms per callback.  We compute exact duration from sample count.
+    chunk_duration = None  # set on first callback
+
     def callback(indata, frames_count, time_info, status):
-        nonlocal silent_chunks, has_spoken, max_vol_seen
+        nonlocal silent_chunks, speech_chunks, has_spoken, max_vol_seen
+        nonlocal noise_floor, speech_start_time, chunk_duration
+
         if time.time() < ignore_until:
             return
-        vol = np.linalg.norm(indata) * 10
+
+        if chunk_duration is None:
+            chunk_duration = frames_count / MIC_SAMPLE_RATE
+
+        # RMS volume — chunk-size-independent measure of average power
+        rms = np.sqrt(np.mean(indata.astype(np.float64) ** 2))
+
+        # Feed VU meter (scale to match MicMeter.VOL_MAX range ~150,000)
         if meter_cb is not None:
-            meter_cb(vol)
-        max_vol_seen = max(max_vol_seen, vol)
+            meter_cb(rms * 100)
+
+        max_vol_seen = max(max_vol_seen, rms)
         frames.append(indata.copy())
-        if vol < SILENCE_THRESHOLD:
+
+        # Adaptive noise floor — only update when likely not speech
+        if rms < noise_floor * 2.0:
+            noise_floor = noise_floor * 0.98 + rms * 0.02
+
+        threshold = max(noise_floor * NOISE_FLOOR_MULTIPLIER, SILENCE_RMS_THRESHOLD)
+
+        if rms < threshold:
             silent_chunks += 1
+            speech_chunks = 0  # reset — require consecutive speech chunks
         else:
             silent_chunks = 0
-            has_spoken = True
+            speech_chunks += 1
+            # Require MIN_SPEECH_CHUNKS above-threshold chunks before arming
+            if not has_spoken and speech_chunks >= MIN_SPEECH_CHUNKS:
+                has_spoken = True
+                speech_start_time = time.time()
+                logger.info("Speech armed: RMS=%.0f floor=%.0f thresh=%.0f",
+                            rms, noise_floor, threshold)
 
     try:
         record_start = time.time()
@@ -129,17 +171,27 @@ def record_until_silence(
                 if elapsed < grace_sec:
                     continue
 
+                # No speech detected yet — use legacy chunk count for "give up" timeout
                 if not has_spoken and silent_chunks > silence_chunks_no_speech:
                     if ignore_sec > 0:
-                        bmo_print("FOLLOW-UP", f"Timeout. Max mic volume: {max_vol_seen:.2f} (threshold {SILENCE_THRESHOLD})")
+                        bmo_print("FOLLOW-UP",
+                                  f"Timeout. Max RMS: {max_vol_seen:.0f} "
+                                  f"(floor {noise_floor:.0f}, threshold {SILENCE_RMS_THRESHOLD})")
                     break
 
-                if has_spoken and silent_chunks > silence_chunks_after_speech:
-                    break
+                # Tiered silence timeout after speech
+                if has_spoken and chunk_duration is not None:
+                    speech_duration = time.time() - speech_start_time
+                    required_silence = _silence_timeout_for_duration(speech_duration)
+                    silence_elapsed = silent_chunks * chunk_duration
+                    if silence_elapsed >= required_silence:
+                        logger.info("Silence stop: spoke=%.1fs, silent=%.1fs/%.1fs, floor=%.0f",
+                                    speech_duration, silence_elapsed, required_silence, noise_floor)
+                        break
 
                 if elapsed > timeout_sec:
                     if ignore_sec > 0:
-                        bmo_print("FOLLOW-UP", f"Max deadline hit. Max volume: {max_vol_seen:.2f}")
+                        bmo_print("FOLLOW-UP", f"Max deadline hit. Max RMS: {max_vol_seen:.0f}")
                     break
     except Exception as e:
         bmo_print("STT", f"Recording Error: {e}")
@@ -170,6 +222,6 @@ def record_until_silence(
         wf.writeframes(data.tobytes())
 
     if ignore_sec > 0:
-        bmo_print("STT", f"Speech finished! Max mic volume: {max_vol_seen:.2f}")
+        bmo_print("STT", f"Speech finished! Max RMS: {max_vol_seen:.0f}")
 
     return filename
