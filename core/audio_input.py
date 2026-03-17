@@ -17,7 +17,7 @@ from .log import bmo_print
 logger = logging.getLogger(__name__)
 
 
-def wait_for_wakeword(oww, stop_event, get_state, suppressed_states):
+def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_suppress_fn=None):
     """Block until the wake word is heard, returning ``True``.
 
     Parameters
@@ -30,6 +30,9 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states):
         Returns the current bot state string.
     suppressed_states : set[str]
         States during which wake-word detection is suppressed.
+    extra_suppress_fn : callable or None
+        Additional suppression check (e.g. post-speech cooldown).
+        Returns True to suppress.
     """
     CHUNK = 1280
     capture_rate = MIC_SAMPLE_RATE
@@ -42,7 +45,7 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states):
                 data, _ = stream.read(CHUNK * downsample_factor)
                 audio_16k = data[::downsample_factor].flatten()
 
-                if get_state() in suppressed_states:
+                if get_state() in suppressed_states or (extra_suppress_fn and extra_suppress_fn()):
                     oww.reset()
                     continue
 
@@ -72,9 +75,6 @@ def record_until_silence(
     filename="input.wav",
 ):
     """Record from the microphone until silence, returning the WAV path or ``None``.
-
-    This function unifies the previous ``record_audio()`` and
-    ``record_followup()`` methods from ``BotGUI``.
 
     Parameters
     ----------

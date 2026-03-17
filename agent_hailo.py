@@ -20,7 +20,7 @@ from openwakeword.model import Model
 from core.llm import Brain, init_llm, is_llm_ready, _get_llm
 from core.tts import init_audio, shutdown_audio, get_player, get_synthesizer, clean_text_for_speech, precache_voice_sounds
 from core.stt import transcribe_audio, init_stt
-from core.config import WAKE_WORD_MODEL, ALSA_DEVICE, FOLLOWUP_ENABLED, t
+from core.config import WAKE_WORD_MODEL, ALSA_DEVICE, t
 from core.audio_input import wait_for_wakeword, record_until_silence
 from core.dispatch import dispatch_stream
 from core.screensaver import screensaver_loop
@@ -157,6 +157,7 @@ class BotGUI:
         self.thinking_audio_process = None
         self.current_display_image = None  # Set when a photo/image is shown on screen
         self.is_muted = False
+        self.last_spoke_at = 0.0  # timestamp of last TTS finish — used to suppress false wake words
 
         # Memory
         self.brain = Brain()
@@ -374,7 +375,10 @@ class BotGUI:
 
     def wait_for_wakeword(self, oww):
         suppressed = {BotStates.SPEAKING, BotStates.JAMMING, BotStates.LISTENING}
-        result = wait_for_wakeword(oww, self.stop_event, lambda: self.current_state, suppressed)
+        # Suppress for 2s after last speech to prevent BMO's own audio from false-triggering
+        post_speech_cooldown = lambda: (time.time() - self.last_spoke_at) < 2.0
+        result = wait_for_wakeword(oww, self.stop_event, lambda: self.current_state, suppressed,
+                                   extra_suppress_fn=post_speech_cooldown)
         if not result and not self.stop_event.is_set():
             self.set_state(BotStates.ERROR)
             time.sleep(2)
@@ -388,17 +392,6 @@ class BotGUI:
             grace_sec=1.5,
             timeout_sec=30.0,
             filename="input.wav",
-        )
-
-    def record_followup(self, timeout_sec=8):
-        bmo_print("FOLLOW-UP", "Listening...")
-        return record_until_silence(
-            self.stop_event,
-            meter_cb=self.meter.feed,
-            grace_sec=timeout_sec,
-            timeout_sec=timeout_sec + 8,
-            ignore_sec=1.0,
-            filename="followup.wav",
         )
 
     # ------------------------------------------------------------------
@@ -441,6 +434,7 @@ class BotGUI:
             else:
                 time.sleep(1.5)
 
+            self.last_spoke_at = time.time()
             if self.current_state == BotStates.SPEAKING:
                 if msg is not None:
                     self.set_state(BotStates.IDLE, "Ready...")
@@ -643,49 +637,6 @@ class BotGUI:
                 traceback.print_exc()
 
             self.set_state(BotStates.IDLE, "Ready")
-
-            if result.music_triggered:
-                bmo_print("FOLLOW-UP", "Skipped — music playback active")
-                time.sleep(1.0)
-                continue
-
-            if not FOLLOWUP_ENABLED:
-                bmo_print("FOLLOW-UP", "Disabled via config")
-                time.sleep(1.0)
-                continue
-
-            # Follow-up conversation loop
-            while True:
-                self.set_state(BotStates.LISTENING, "Still listening...")
-                followup_wav = self.record_followup(timeout_sec=8)
-
-                if not followup_wav:
-                    self.set_state(BotStates.IDLE, "Waiting...")
-                    break
-
-                self.set_state(BotStates.THINKING, "Transcribing...")
-                threading.Thread(target=self._play_thinking_loop, daemon=True).start()
-                user_text = self.transcribe(followup_wav)
-                bmo_print("STT", f"Follow-up Transcribed: {user_text}")
-                self.show_user_prompt(user_text)
-
-                if len(user_text) < 2:
-                    self._stop_thinking_audio()
-                    self.set_state(BotStates.IDLE, "Waiting...")
-                    break
-
-                self.set_state(BotStates.THINKING, "Thinking...")
-                self._stop_thinking_audio()
-
-                try:
-                    self._dispatch_and_speak(user_text, on_music)
-                except Exception as e:
-                    bmo_print("AGENT", f"Follow-up LLM error: {e}")
-
-                self.set_state(BotStates.IDLE, "Ready")
-
-            # ALSA cool-down before next wake word cycle
-            time.sleep(1.0)
 
     # ------------------------------------------------------------------
     # Screensaver audio

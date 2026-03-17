@@ -133,7 +133,6 @@ SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
 
 # UI Settings
 MIC_METER_ENABLED = True  # Show mic gain meter overlay during listening
-FOLLOWUP_ENABLED = False  # Keep listening after BMO responds for multi-turn conversation
 
 # Localized strings for hardcoded speech lines
 STRINGS = {
