@@ -16,6 +16,9 @@ if [ -z "${DISPLAY:-}" ]; then
     export DISPLAY=:0
 fi
 
+# Unbuffered stdout/stderr so journalctl gets logs in real-time
+export PYTHONUNBUFFERED=1
+
 # Run the agent using python3 (Use new Hailo optimized agent)
 exec python3 agent_hailo.py "$@"
 

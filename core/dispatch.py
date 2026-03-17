@@ -8,6 +8,7 @@ Extracted from the 200-line chunk-parsing loop inside ``BotGUI.main_loop``.
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class ActionResult:
     """Aggregated result of consuming a ``stream_think()`` generator."""
     take_photo: bool = False
     music_triggered: bool = False
+    voice_eq: bool = False
     image_url: str | None = None
     speak_chunks: list[str] = field(default_factory=list)
 
@@ -52,6 +54,7 @@ def dispatch_stream(
     if valid_expressions is None:
         valid_expressions = set()
 
+    stream_start = time.time()
     for chunk in brain.stream_think(user_text):
         if not chunk.strip():
             continue
@@ -98,10 +101,22 @@ def dispatch_stream(
                         on_music()
                     chunk = chunk.replace(json_match.group(0), '').strip()
 
+                elif action == "voice_eq":
+                    # voice_eq is only valid from pre-LLM keyword detection
+                    # (which short-circuits before the LLM runs and yields
+                    # exactly one chunk).  If we've already seen other chunks,
+                    # the LLM is hallucinating — just strip the JSON silently.
+                    if not result.speak_chunks:
+                        result.voice_eq = True
+                    chunk = chunk.replace(json_match.group(0), '').strip()
+
             except Exception as e:
                 bmo_print("AGENT", f"JSON Parse Error: {e} for: '{json_match.group(0)[:50]}'")
 
         if chunk.strip():
             result.speak_chunks.append(chunk)
 
+    ttlt = time.time() - stream_start
+    from .log import bmo_print
+    bmo_print("LLM", f"TTLT: {ttlt:.2f}s ({len(result.speak_chunks)} chunks)")
     return result

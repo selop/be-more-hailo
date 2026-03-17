@@ -35,6 +35,12 @@ MUSIC_KEYWORDS = [
     "sing for bmo", "bmo sing", "play me some music",
 ]
 
+VOICE_EQ_KEYWORDS = [
+    "tune your voice", "voice settings", "voice tuner",
+    "adjust your voice", "change your voice", "voice equalizer",
+    "eq settings", "tune voice", "voice eq",
+]
+
 REALTIME_KEYWORDS = [
     "weather", "forecast", "temperature", "tonight", "tomorrow",
     "news", "latest", "right now", "score", "stocks", "bitcoin",
@@ -85,6 +91,9 @@ def detect_pre_llm_action(user_text: str) -> dict | None:
 
     if any(kw in lower for kw in MUSIC_KEYWORDS):
         return {"action": "play_music"}
+
+    if any(kw in lower for kw in VOICE_EQ_KEYWORDS):
+        return {"action": "voice_eq"}
 
     return None
 

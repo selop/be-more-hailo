@@ -5,7 +5,7 @@ import re
 import json
 import threading
 import wave
-from .config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE
+from .config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE, VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -197,15 +197,109 @@ class SoundHandle:
         return 0 if self._done.is_set() else None
 
 
-def play_wav_file(filepath: str):
+def play_wav_file(filepath: str, apply_voice_lpf: bool = False):
     """Play a WAV file through the persistent AudioPlayer.
-    Returns a SoundHandle with .wait() and .terminate() (like Popen)."""
+    Returns a SoundHandle with .wait() and .terminate() (like Popen).
+
+    If *apply_voice_lpf* is True and the voice LPF is enabled, the BMO
+    lo-fi filter is applied to the audio before playback.
+    """
     import wave as _wave
     import numpy as np
 
     player = get_player()
     if player is None:
         return None
+
+    try:
+        pcm = _load_and_filter_wav(filepath, apply_voice_lpf)
+        if pcm is None:
+            return None
+
+        player.resume()  # clear any previous stop event
+        handle = SoundHandle()
+        handle.start(player, pcm)
+        return handle
+
+    except Exception as e:
+        logger.warning(f"play_wav_file error for {filepath}: {e}")
+        return None
+
+
+# =========================================================================
+# Filtered WAV cache — pre-filter voice sounds at startup so play_sound()
+# has zero runtime scipy overhead.  Cached WAVs are stored on disk in
+# sounds/.cache/ as 22050Hz mono int16 WAVs with LPF applied.
+# =========================================================================
+
+_cache_dir = os.path.join("sounds", ".cache")
+
+
+def precache_voice_sounds(file_list: list[str]):
+    """Pre-filter a list of WAV files and write cached versions to disk.
+    Called once during startup after init_audio().  Skips files that are
+    already cached (mtime check)."""
+    os.makedirs(_cache_dir, exist_ok=True)
+    count = 0
+    for filepath in file_list:
+        try:
+            cached = _cached_path(filepath)
+            # Skip if cache exists and is newer than source
+            if os.path.exists(cached):
+                if os.path.getmtime(cached) >= os.path.getmtime(filepath):
+                    continue
+            pcm = _load_and_filter_wav(filepath, apply_voice_lpf=True)
+            if pcm:
+                _write_wav(cached, pcm)
+                count += 1
+        except Exception as e:
+            logger.warning(f"precache error for {filepath}: {e}")
+    if count:
+        logger.info(f"Pre-cached {count} voice sound(s) with LPF")
+
+
+def get_cached_path(filepath: str) -> str:
+    """Return path to cached filtered WAV, or the original if no cache."""
+    cached = _cached_path(filepath)
+    if os.path.exists(cached):
+        return cached
+    return filepath
+
+
+def invalidate_cache():
+    """Delete all cached WAVs (called when EQ settings change)."""
+    if os.path.isdir(_cache_dir):
+        for f in os.listdir(_cache_dir):
+            try:
+                os.unlink(os.path.join(_cache_dir, f))
+            except OSError:
+                pass
+    logger.info("Voice sound cache invalidated")
+
+
+def _cached_path(filepath: str) -> str:
+    """Deterministic cache filename for a source WAV."""
+    import hashlib
+    h = hashlib.md5(filepath.encode()).hexdigest()[:12]
+    basename = os.path.splitext(os.path.basename(filepath))[0]
+    return os.path.join(_cache_dir, f"{basename}_{h}.wav")
+
+
+def _write_wav(path: str, pcm: bytes):
+    """Write raw int16 mono 22050Hz PCM to a WAV file."""
+    import wave as _wave
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _wave.open(path, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(AudioPlayer.SAMPLE_RATE)
+        wf.writeframes(pcm)
+
+
+def _load_and_filter_wav(filepath: str, apply_voice_lpf: bool = False) -> bytes | None:
+    """Load a WAV file, convert to mono int16 @ 22050Hz, optionally apply LPF."""
+    import wave as _wave
+    import numpy as np
 
     try:
         with _wave.open(filepath, 'rb') as wf:
@@ -232,7 +326,7 @@ def play_wav_file(filepath: str):
             arr = np.frombuffer(pcm, dtype=np.int16).reshape(-1, n_channels)
             pcm = arr[:, 0].tobytes()
 
-        # Resample to 22050 if needed (AudioPlayer expects 22050Hz)
+        # Resample to 22050 if needed
         if sample_rate != AudioPlayer.SAMPLE_RATE:
             from scipy.signal import resample
             arr = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
@@ -240,13 +334,14 @@ def play_wav_file(filepath: str):
             arr = resample(arr, num_samples)
             pcm = np.clip(arr, -32768, 32767).astype(np.int16).tobytes()
 
-        player.resume()  # clear any previous stop event
-        handle = SoundHandle()
-        handle.start(player, pcm)
-        return handle
+        # Apply BMO voice low-pass filter
+        if apply_voice_lpf and VOICE_LPF_ENABLED and pcm:
+            pcm = PiperSynthesizer._apply_lpf(pcm)
+
+        return pcm
 
     except Exception as e:
-        logger.warning(f"play_wav_file error for {filepath}: {e}")
+        logger.warning(f"_load_and_filter_wav error for {filepath}: {e}")
         return None
 
 
@@ -272,8 +367,47 @@ class PiperSynthesizer:
         except Exception as e:
             logger.warning(f"PiperSynthesizer: piper-tts load failed ({e}), falling back to subprocess")
 
+    # Low-pass filter for BMO's characteristic "tiny speaker" voice.
+    # Cuts frequencies above the cutoff, matching the Adventure Time sound.
+    _lpf_sos = None
+
+    @staticmethod
+    def _get_lpf():
+        """Lazily build a Butterworth low-pass filter from config settings."""
+        if PiperSynthesizer._lpf_sos is None:
+            from scipy.signal import butter
+            PiperSynthesizer._lpf_sos = butter(
+                VOICE_LPF_ORDER, VOICE_LPF_CUTOFF, btype='low', fs=22050, output='sos'
+            )
+            logger.info(f"Voice LPF: {VOICE_LPF_CUTOFF}Hz cutoff, order {VOICE_LPF_ORDER}")
+        return PiperSynthesizer._lpf_sos
+
+    @staticmethod
+    def _apply_lpf(pcm_bytes: bytes) -> bytes:
+        """Apply low-pass filter to raw int16 PCM bytes."""
+        import numpy as np
+        from scipy.signal import sosfilt
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+        filtered = sosfilt(PiperSynthesizer._get_lpf(), samples)
+        return np.clip(filtered, -32768, 32767).astype(np.int16).tobytes()
+
+    @classmethod
+    def invalidate_lpf(cls):
+        """Clear cached filter coefficients so next synthesis rebuilds from current config."""
+        cls._lpf_sos = None
+
     def synthesize(self, text: str) -> bytes:
-        """Synthesize text to raw int16 PCM bytes at 22050Hz."""
+        """Synthesize text to raw int16 PCM bytes at 22050Hz, with optional BMO lo-fi filter."""
+        if self._use_library:
+            pcm = self._synthesize_library(text)
+        else:
+            pcm = self._synthesize_subprocess(text)
+        if pcm and VOICE_LPF_ENABLED:
+            pcm = self._apply_lpf(pcm)
+        return pcm
+
+    def synthesize_raw(self, text: str) -> bytes:
+        """Synthesize text to raw int16 PCM bytes WITHOUT any filter applied."""
         if self._use_library:
             return self._synthesize_library(text)
         return self._synthesize_subprocess(text)
@@ -306,6 +440,9 @@ def init_audio(alsa_device_name: str = None):
     global _player, _synthesizer
     _player = AudioPlayer(alsa_device_name)
     _synthesizer = PiperSynthesizer()
+    # Pre-warm scipy LPF so first voice sound doesn't stall on import
+    if VOICE_LPF_ENABLED:
+        PiperSynthesizer._get_lpf()
     logger.info("Audio subsystem initialized")
 
 def shutdown_audio():

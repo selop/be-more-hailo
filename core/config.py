@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 from dotenv import load_dotenv
 
@@ -80,6 +81,29 @@ PIPER_MODELS = {
 PIPER_MODEL = PIPER_MODELS.get(LANGUAGE, PIPER_MODELS["en"])
 # Speech rate: >1.0 = slower. German low-quality model speaks too fast at default 1.0
 PIPER_LENGTH_SCALE = {"en": 1.0, "de": 1.4}.get(LANGUAGE, 1.0)
+
+# Voice EQ — low-pass filter for BMO's "tiny speaker" sound (Adventure Time style)
+VOICE_LPF_ENABLED = os.environ.get("VOICE_LPF_ENABLED", "1") != "0"
+VOICE_LPF_CUTOFF = int(os.environ.get("VOICE_LPF_CUTOFF", "4000"))   # Hz (try 4000–8000)
+VOICE_LPF_ORDER = int(os.environ.get("VOICE_LPF_ORDER", "4"))        # Butterworth order (2=gentle, 6=steep)
+
+VOICE_EQ_FILE = "voice_eq.json"
+
+def _load_voice_eq():
+    """Override VOICE_LPF_* globals from voice_eq.json if it exists."""
+    global VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER
+    if os.path.exists(VOICE_EQ_FILE):
+        try:
+            with open(VOICE_EQ_FILE, "r") as f:
+                data = json.load(f)
+            VOICE_LPF_ENABLED = data.get("enabled", VOICE_LPF_ENABLED)
+            VOICE_LPF_CUTOFF = int(data.get("cutoff", VOICE_LPF_CUTOFF))
+            VOICE_LPF_ORDER = int(data.get("order", VOICE_LPF_ORDER))
+        except Exception:
+            pass
+
+_load_voice_eq()
+
 # ALSA output device for hardware audio playback (aplay -D).
 # The USB combo device (mic+speaker) exposes two ALSA cards:
 #   card 2: UACDemoV10 -> speaker/playback output

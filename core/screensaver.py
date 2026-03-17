@@ -150,7 +150,6 @@ def screensaver_loop(
     persona_states : list[str] or None
     alsa_device : str or None
     """
-    import subprocess
     import os
 
     if expression_states is None:
@@ -190,7 +189,10 @@ def screensaver_loop(
             sound_file = os.path.join("sounds", "personas", f"{persona}.wav")
             if not is_muted_fn() and os.path.exists(sound_file) and alsa_device:
                 try:
-                    subprocess.Popen(['aplay', '-D', alsa_device, '-q', sound_file])
+                    from .tts import get_cached_path
+                    import subprocess
+                    cached = get_cached_path(sound_file)
+                    subprocess.Popen(['aplay', '-D', alsa_device, '-q', cached])
                 except Exception:
                     pass
 

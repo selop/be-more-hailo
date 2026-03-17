@@ -42,6 +42,26 @@ logger = logging.getLogger(__name__)
 # unbounded memory growth on memory-constrained devices like a Pi.
 MAX_HISTORY_MESSAGES = 20
 
+# If the last N assistant responses share this much text, the LLM is stuck.
+STUCK_CHECK_COUNT = 2
+STUCK_SIMILARITY_LEN = 40
+
+# Phrases that indicate the LLM broke character or entered a refusal loop.
+_REFUSAL_PATTERNS = [
+    "i can't continue",
+    "i cannot continue",
+    "i can't disclose",
+    "i cannot disclose",
+    "i can't assist with",
+    "i cannot assist with",
+    "please allow bmo to respond",
+    "i'm not bmo",
+    "i am not bmo",
+    "as an ai",
+    "as a language model",
+    "don't ask me to repeat",
+]
+
 
 class Brain:
     def __init__(self):
@@ -52,6 +72,32 @@ class Brain:
         non_system = self.history[1:]
         if len(non_system) > MAX_HISTORY_MESSAGES:
             self.history = [self.history[0]] + non_system[-MAX_HISTORY_MESSAGES:]
+
+    def _check_stuck(self, latest_response: str) -> bool:
+        """Detect if the LLM is stuck in a refusal/repetition loop.
+        Returns True if history was reset."""
+        lower = latest_response.lower()
+
+        # Check for known refusal patterns
+        is_refusal = any(pat in lower for pat in _REFUSAL_PATTERNS)
+
+        # Check if recent assistant messages are near-identical
+        recent = [m["content"] for m in self.history
+                  if m["role"] == "assistant"][-STUCK_CHECK_COUNT:]
+        is_repetition = (
+            len(recent) >= STUCK_CHECK_COUNT
+            and all(
+                r[:STUCK_SIMILARITY_LEN] == recent[0][:STUCK_SIMILARITY_LEN]
+                for r in recent
+            )
+        )
+
+        if is_refusal or is_repetition:
+            reason = "refusal" if is_refusal else "repetition"
+            bmo_print("BRAIN", f"Stuck detected ({reason}), resetting history")
+            self.history = [{"role": "system", "content": get_system_prompt()}]
+            return True
+        return False
 
     # ── Non-streaming inference ───────────────────────────────────────────
 
@@ -121,6 +167,10 @@ class Brain:
             content = clean_llm_response(content)
 
             self.history.append({"role": "assistant", "content": content})
+
+            # Detect stuck LLM (refusal loops / repetition)
+            if self._check_stuck(content):
+                return "BMO got a little confused! Let's start fresh. How can I help?"
 
             # Clean injected search context from history
             if search_injected:
@@ -216,6 +266,11 @@ class Brain:
                     yield out_chunk
 
             self.history.append({"role": "assistant", "content": full_content})
+
+            # Detect stuck LLM (refusal loops / repetition) — the bad
+            # response was already yielded, but we reset history so the
+            # NEXT interaction starts clean.
+            self._check_stuck(full_content)
 
             # Clean injected search context from history
             if search_injected:
