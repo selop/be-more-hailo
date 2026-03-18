@@ -46,6 +46,7 @@ class AnimationEngine:
         *,
         get_state,
         get_last_state_change,
+        get_display_image,
         on_screensaver,
         status_label,
         bubble,
@@ -57,6 +58,7 @@ class AnimationEngine:
         self.label = background_label
         self.get_state = get_state
         self.get_last_state_change = get_last_state_change
+        self.get_display_image = get_display_image
         self.on_screensaver = on_screensaver
         self.status_label = status_label
         self.bubble = bubble
@@ -117,13 +119,13 @@ class AnimationEngine:
     # Per-tick update (called via master.after)
     # ------------------------------------------------------------------
 
-    def update(self, master, current_display_image):
+    def update(self, master):
         """Advance one animation frame. Call from the Tkinter after-loop."""
         state = self.get_state()
 
         # Don't animate while a photo/image is on screen
-        if state == self.display_image_state or current_display_image is not None:
-            master.after(500, lambda: self.update(master, current_display_image))
+        if state == self.display_image_state or self.get_display_image() is not None:
+            master.after(500, lambda: self.update(master))
             return
 
         # Idle → screensaver after 60s
@@ -155,7 +157,7 @@ class AnimationEngine:
             self.label.config(image=frames[min(self.current_frame, len(frames) - 1)])
 
         speed = self._speed_for_state(state)
-        master.after(speed, lambda: self.update(master, current_display_image))
+        master.after(speed, lambda: self.update(master))
 
     @staticmethod
     def _speed_for_state(state):

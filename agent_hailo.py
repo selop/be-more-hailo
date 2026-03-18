@@ -203,6 +203,7 @@ class BotGUI:
             BotStates.ALL,
             get_state=lambda: self.current_state,
             get_last_state_change=lambda: self.last_state_change,
+            get_display_image=lambda: self.current_display_image,
             on_screensaver=lambda: self.set_state(BotStates.SCREENSAVER, "Screensaver..."),
             status_label=self.status_label,
             bubble=self.bubble,
@@ -253,9 +254,7 @@ class BotGUI:
     # ------------------------------------------------------------------
 
     def _start_animation_loop(self):
-        def tick():
-            self.anim.update(self.master, self.current_display_image)
-        self.master.after(500, tick)
+        self.master.after(500, lambda: self.anim.update(self.master))
 
     # ------------------------------------------------------------------
     # State management
@@ -567,6 +566,10 @@ class BotGUI:
             # Record
             self.set_state(BotStates.LISTENING, "Listening...")
             wav_file = self.record_audio()
+
+            if not wav_file:
+                self.set_state(BotStates.IDLE, "Ready")
+                continue
 
             # Transcribe
             self.set_state(BotStates.THINKING, "Transcribing...")
