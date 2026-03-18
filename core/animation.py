@@ -17,11 +17,13 @@ class AnimationEngine:
     background_label : tk.Label
         The label widget that displays the current frame.
     all_states : list[str]
-        Every BotStates value that has a ``faces/<state>/`` directory.
+        Every expression/state value that has a ``faces/<state>/`` directory.
     get_state : callable() -> str
-        Returns the current bot state string.
-    get_last_state_change : callable() -> float
-        Returns ``time.time()`` of the most recent state change.
+        Returns the current expression string (the face to display).
+    get_phase : callable() -> str
+        Returns the current phase string (for speed lookup, screensaver trigger).
+    get_last_phase_change : callable() -> float
+        Returns ``time.time()`` of the most recent phase change.
     on_screensaver : callable()
         Called when idle timeout triggers the screensaver.
     status_label : tk.Label
@@ -45,7 +47,8 @@ class AnimationEngine:
         all_states,
         *,
         get_state,
-        get_last_state_change,
+        get_phase,
+        get_last_phase_change,
         get_display_image,
         on_screensaver,
         status_label,
@@ -57,7 +60,8 @@ class AnimationEngine:
     ):
         self.label = background_label
         self.get_state = get_state
-        self.get_last_state_change = get_last_state_change
+        self.get_phase = get_phase
+        self.get_last_phase_change = get_last_phase_change
         self.get_display_image = get_display_image
         self.on_screensaver = on_screensaver
         self.status_label = status_label
@@ -121,20 +125,22 @@ class AnimationEngine:
 
     def update(self, master):
         """Advance one animation frame. Call from the Tkinter after-loop."""
-        state = self.get_state()
+        phase = self.get_phase()
+        expression = self.get_state()
 
         # Don't animate while a photo/image is on screen
-        if state == self.display_image_state or self.get_display_image() is not None:
+        if phase == self.display_image_state or self.get_display_image() is not None:
             master.after(500, lambda: self.update(master))
             return
 
         # Idle → screensaver after 60s
-        if state == "idle" and (time.time() - self.get_last_state_change()) > 60:
+        if phase == "idle" and (time.time() - self.get_last_phase_change()) > 60:
             self.on_screensaver()
-            state = self.get_state()
+            phase = self.get_phase()
+            expression = self.get_state()
 
         # Hide/show status label during screensaver
-        if state == self.screensaver_state:
+        if phase == self.screensaver_state:
             if self.status_label.winfo_ismapped():
                 self.status_label.place_forget()
             self.bubble.hide()
@@ -142,21 +148,21 @@ class AnimationEngine:
             if not self.status_label.winfo_ismapped():
                 self.status_label.place(relx=0.5, rely=0.92, anchor="s")
 
-        frames = self.animations.get(state, []) or self.animations.get("idle", [])
+        frames = self.animations.get(expression, []) or self.animations.get("idle", [])
         if frames:
-            if state == "warmup":
+            if expression == "warmup":
                 if self.current_frame < 12:
                     self.current_frame = (self.current_frame + 1) % 12
             else:
                 self.current_frame = (self.current_frame + 1) % len(frames)
 
             # Re-shuffle screensaver on loop completion
-            if state == self.screensaver_state and self.current_frame == 0:
+            if phase == self.screensaver_state and self.current_frame == 0:
                 self._rebuild_screensaver_frames()
 
             self.label.config(image=frames[min(self.current_frame, len(frames) - 1)])
 
-        speed = self._speed_for_state(state)
+        speed = self._speed_for_state(phase)
         master.after(speed, lambda: self.update(master))
 
     @staticmethod

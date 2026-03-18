@@ -119,6 +119,7 @@ def screensaver_loop(
     is_llm_ready_fn,
     get_llm_fn,
     *,
+    get_expression=None,
     screensaver_state="screensaver",
     display_image_state="display_image",
     expression_states=None,
@@ -134,6 +135,7 @@ def screensaver_loop(
     ----------
     stop_event : threading.Event
     get_state : callable() -> str
+        Returns the current phase string.
     set_state : callable(str, str)
     speak_fn : callable(str, msg=str)
     play_sound_fn : callable(str) -> handle
@@ -145,6 +147,9 @@ def screensaver_loop(
     set_last_audio_time : callable(float)
     is_llm_ready_fn : callable() -> bool
     get_llm_fn : callable
+    get_expression : callable() -> str or None
+        Returns the current expression string.  When provided, revert
+        guards check expression instead of phase.
     screensaver_state, display_image_state : str
     expression_states : list[str] or None
     persona_states : list[str] or None
@@ -173,12 +178,15 @@ def screensaver_loop(
         if time.time() - get_last_state_change() < 60:
             continue
 
+        # Helper: check current expression (falls back to phase if no expression callback)
+        _get_expr = get_expression if get_expression is not None else get_state
+
         # Random visual-only boredom animations (~10% chance every 30s)
         if random.random() < 0.10:
             expr = random.choice(expression_states)
             set_state(expr, "Zzz..." if expr == "sleepy" else "...")
             time.sleep(4)
-            if get_state() == expr:
+            if _get_expr() == expr:
                 set_state(screensaver_state, "Screensaver...")
 
         # Random Persona Gags (~5% chance every 30s)
@@ -197,7 +205,7 @@ def screensaver_loop(
                     pass
 
             time.sleep(8)
-            if get_state() == persona:
+            if _get_expr() == persona:
                 set_state(screensaver_state, "Screensaver...")
             continue
 

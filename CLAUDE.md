@@ -38,6 +38,7 @@ There is no formal test suite (no pytest). Benchmark files (`scripts/benchmark_l
 agent_hailo.py  ─┐
                   ├──► core/  ──► hailo_platform.genai (NPU) ──► Hailo-10H
 web_app.py      ─┘      │
+                         ├── state.py        # Centralized StateStore: Phase enum + expression (see docs/state-store.md)
                          ├── config.py       # All paths, models, system prompt, ALSA devices
                          ├── npu.py          # VDevice + LLM + VLM lifecycle (hardware layer)
                          ├── actions.py      # Keyword matching, response cleaning (pure functions, no HW)
@@ -68,20 +69,21 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 
 ### Key Design Patterns
 
+- **State store (`core/state.py`)**: Centralized `StateStore` separates *phase* (what BMO is doing: `Phase.IDLE`, `Phase.SPEAKING`, etc.) from *expression* (what face to display: `"happy"`, `"detective"`, etc.). Phase changes are thread-safe with hooks; expressions change independently. Use `store.set_phase()` for phase transitions, `store.set_expression()` for face-only changes. See `docs/state-store.md` for full design and `/use-state-store` skill for implementation guidance.
 - **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes
 - **Sentence-streaming TTS**: Response is split sentence-by-sentence; TTS plays each sentence as LLM continues generating
 - **System prompt caching**: `llm.save_context()` / `llm.load_context()` caches system prompt KV state at startup — not re-processed every turn
-- **Wake word suppression**: Wake word detection is suppressed during SPEAKING and JAMMING states to prevent BMO's own audio from triggering false detections
+- **Wake word suppression**: Wake word detection is suppressed during `Phase.SPEAKING` and `Phase.JAMMING` to prevent BMO's own audio from triggering false detections
 - **Pronunciation system**: User corrects pronunciation → LLM appends `!PRONOUNCE: word=phonetic` → saved to `pronunciations.json` → Piper substitutions
 - **VLM subprocess swap**: Main process releases STT+LLM+VDevice → forks child → child loads VLM → inference → child exits → parent reloads LLM+STT+system prompt cache
 - **Screensaver**: Triggers after 60s idle, cycles through expression personas, speaks random LLM-generated thoughts every ~30 min (respects night hours 10PM-8AM)
 
 ### Adding New Face States
 
-When adding a new `BotStates` entry with animation frames:
+When adding a new expression with animation frames:
 1. Create the generator function in `generate_faces.py` (e.g. `gen_mystate()`)
 2. Add it to the `if __name__ == "__main__"` block
-3. **Add the state to the animation loading list** in `agent_hailo.py` → `load_animations()` — the `for state in [...]` loop. If you forget this, the state will silently fall back to the idle face.
+3. Add the expression string to the appropriate set in `core/state.py`: `VALID_EXPRESSIONS` (emotion faces) or `PERSONA_EXPRESSIONS` (persona gags). This auto-includes it in `ALL_EXPRESSION_NAMES` and `BotStates.ALL` for animation loading.
 4. Run `python generate_faces.py` on the Pi to create the PNG frames
 5. New sound categories also need to be registered in `self.sounds` dict in `load_sounds()`
 

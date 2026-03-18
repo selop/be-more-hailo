@@ -31,6 +31,7 @@ from core.sounds import SoundManager
 from core.animation import AnimationEngine
 from core.camera import CameraHandler
 from core.image_display import download_and_display
+from core.state import StateStore, Phase, ALL_EXPRESSION_NAMES, VALID_EXPRESSIONS
 from core.log import bmo_print, setup_logging
 
 setup_logging()
@@ -90,48 +91,6 @@ def _refresh_imports():
 # 2. GUI & STATE
 # =========================================================================
 
-class BotStates:
-    IDLE = "idle"
-    LISTENING = "listening"
-    THINKING = "thinking"
-    SPEAKING = "speaking"
-    ERROR = "error"
-    CAPTURING = "capturing"
-    WARMUP = "warmup"
-    DISPLAY_IMAGE = "display_image"
-    SCREENSAVER = "screensaver"
-    # Expressions
-    HAPPY = "happy"
-    SAD = "sad"
-    ANGRY = "angry"
-    SURPRISED = "surprised"
-    SLEEPY = "sleepy"
-    DIZZY = "dizzy"
-    CHEEKY = "cheeky"
-    HEART = "heart"
-    STARRY_EYED = "starry_eyed"
-    CONFUSED = "confused"
-    SHHH = "shhh"
-    JAMMING = "jamming"
-    FOOTBALL = "football"
-    DETECTIVE = "detective"
-    SIR_MANO = "sir_mano"
-    LOW_BATTERY = "low_battery"
-    BEE = "bee"
-
-    ALL = [
-        IDLE, LISTENING, THINKING, SPEAKING, ERROR, CAPTURING, WARMUP,
-        HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, DIZZY, CHEEKY, HEART,
-        STARRY_EYED, CONFUSED, SHHH, JAMMING, FOOTBALL, DETECTIVE,
-        SIR_MANO, LOW_BATTERY, BEE,
-    ]
-
-    VALID_EXPRESSIONS = {
-        HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, DIZZY,
-        CHEEKY, HEART, STARRY_EYED, CONFUSED,
-    }
-
-
 class BotGUI:
 
     BG_WIDTH, BG_HEIGHT = 800, 480
@@ -150,20 +109,17 @@ class BotGUI:
 
         # Events
         self.stop_event = threading.Event()
-        self.current_state = BotStates.WARMUP
-        self.last_state_change = time.time()
+        self.store = StateStore()
+        self.store.on_phase_change(self._on_phase_change)
 
-        # Audio State
+        # Audio State (subprocess handle — not state, stays on BotGUI)
         self.thinking_audio_process = None
-        self.current_display_image = None  # Set when a photo/image is shown on screen
-        self.is_muted = False
-        self.last_spoke_at = 0.0  # timestamp of last TTS finish — used to suppress false wake words
 
         # Memory
         self.brain = Brain()
 
         # --- Sound Manager ---
-        self.sounds = SoundManager(is_muted_fn=lambda: self.is_muted)
+        self.sounds = SoundManager(is_muted_fn=lambda: self.store.muted)
 
         # --- UI widgets ---
         self.background_label = tk.Label(master, bg='black')
@@ -200,15 +156,16 @@ class BotGUI:
         # --- Animation Engine ---
         self.anim = AnimationEngine(
             self.background_label,
-            BotStates.ALL,
-            get_state=lambda: self.current_state,
-            get_last_state_change=lambda: self.last_state_change,
-            get_display_image=lambda: self.current_display_image,
-            on_screensaver=lambda: self.set_state(BotStates.SCREENSAVER, "Screensaver..."),
+            sorted(ALL_EXPRESSION_NAMES),
+            get_state=lambda: self.store.expression,
+            get_phase=lambda: self.store.phase.value,
+            get_last_phase_change=lambda: self.store.last_phase_change,
+            get_display_image=lambda: self.store.display_image,
+            on_screensaver=lambda: self.store.set_phase(Phase.SCREENSAVER, msg="Screensaver..."),
             status_label=self.status_label,
             bubble=self.bubble,
-            screensaver_state=BotStates.SCREENSAVER,
-            display_image_state=BotStates.DISPLAY_IMAGE,
+            screensaver_state=Phase.SCREENSAVER.value,
+            display_image_state=Phase.DISPLAY_IMAGE.value,
         )
         self._start_animation_loop()
 
@@ -220,8 +177,8 @@ class BotGUI:
             brain=self.brain,
             background_label=self.background_label,
             bubble=self.bubble,
-            set_display_image=self._set_display_image,
-            clear_display_image=self._clear_display_image,
+            set_display_image=self.store.set_display_image,
+            clear_display_image=self.store.clear_display_image,
             stop_thinking_audio=self._stop_thinking_audio,
         )
 
@@ -240,16 +197,6 @@ class BotGUI:
         ).start()
 
     # ------------------------------------------------------------------
-    # Display-image helpers (prevent GC of PhotoImage references)
-    # ------------------------------------------------------------------
-
-    def _set_display_image(self, tk_img):
-        self.current_display_image = tk_img
-
-    def _clear_display_image(self):
-        self.current_display_image = None
-
-    # ------------------------------------------------------------------
     # Animation loop bridge
     # ------------------------------------------------------------------
 
@@ -260,18 +207,32 @@ class BotGUI:
     # State management
     # ------------------------------------------------------------------
 
-    def set_state(self, state, msg=""):
-        if state != self.current_state:
-            self.current_state = state
-            self.anim.current_frame = 0
-            self.last_state_change = time.time()
-            bmo_print("STATE", f"{state.upper()}: {msg}")
-            if state == BotStates.LISTENING:
-                self.meter.show()
-            else:
-                self.meter.hide()
+    def _on_phase_change(self, old_phase, new_phase, msg):
+        """Hook fired by StateStore on every phase transition."""
+        self.anim.current_frame = 0
+        bmo_print("STATE", f"{new_phase.value.upper()}: {msg}")
         if msg:
             self.status_label.config(text=msg)
+        if new_phase == Phase.LISTENING:
+            self.meter.show()
+        else:
+            self.meter.hide()
+
+    def set_state(self, state, msg=""):
+        """String bridge — routes phase names to ``store.set_phase()``,
+        expression names to ``store.set_expression()``.
+
+        Prefer ``store.set_phase(Phase.X, msg=...)`` directly in new code.
+        Kept for callbacks that pass plain strings (screensaver, camera).
+        """
+        try:
+            phase = Phase(state)
+            self.store.set_phase(phase, msg=msg)
+        except ValueError:
+            # Expression-only (e.g. "happy", "football") — face changes, phase stays
+            self.store.set_expression(state)
+            if msg:
+                self.status_label.config(text=msg)
 
     def show_user_prompt(self, text):
         self.bubble.show(text)
@@ -285,8 +246,8 @@ class BotGUI:
     # ------------------------------------------------------------------
 
     def mute_bmo(self, event=None):
-        self.is_muted = not self.is_muted
-        if self.is_muted:
+        self.store.set_muted(not self.store.muted)
+        if self.store.muted:
             self.mute_label.place(relx=0.95, rely=0.05, anchor=tk.NE)
             player = get_player()
             if player:
@@ -297,20 +258,24 @@ class BotGUI:
             except Exception:
                 pass
 
-            old_state = self.current_state
-            self.set_state(BotStates.SHHH, "Muted")
+            old_phase = self.store.phase
+            self.store.set_phase(Phase.SHHH, msg="Muted")
             self._stop_thinking_audio()
 
             def revert_state():
-                if self.current_state == BotStates.SHHH:
-                    self.set_state(old_state if old_state != BotStates.SHHH else BotStates.IDLE, "Muted")
+                if self.store.phase == Phase.SHHH:
+                    self.store.set_phase(
+                        old_phase if old_phase != Phase.SHHH else Phase.IDLE,
+                        msg="Muted",
+                    )
             self.master.after(3000, revert_state)
         else:
             self.mute_label.place_forget()
-            self.set_state(BotStates.HAPPY, "Unmuted!")
+            self.store.set_phase(Phase.IDLE, expression="happy", msg="Unmuted!")
             def revert_state():
-                if self.current_state == BotStates.HAPPY:
-                    self.set_state(BotStates.IDLE, "Ready...")
+                if self.store.expression == "happy" and self.store.phase == Phase.IDLE:
+                    self.store.set_expression("idle")
+                    self.status_label.config(text="Ready...")
             self.master.after(2000, revert_state)
 
     def _on_press(self, event=None):
@@ -355,16 +320,16 @@ class BotGUI:
             self.thinking_audio_process = None
 
     def _play_thinking_loop(self):
-        """Background thread: ack sound → thinking sounds until state changes."""
+        """Background thread: ack sound → thinking sounds until phase changes."""
         ack_proc = self.sounds.play("ack_sounds")
         if ack_proc:
             ack_proc.wait()
-        while self.current_state == BotStates.THINKING:
+        while self.store.phase == Phase.THINKING:
             self.thinking_audio_process = self.sounds.play("thinking_sounds")
             if self.thinking_audio_process:
                 self.thinking_audio_process.wait()
             for _ in range(80):
-                if self.current_state != BotStates.THINKING:
+                if self.store.phase != Phase.THINKING:
                     break
                 time.sleep(0.1)
 
@@ -373,13 +338,13 @@ class BotGUI:
     # ------------------------------------------------------------------
 
     def wait_for_wakeword(self, oww):
-        suppressed = {BotStates.SPEAKING, BotStates.JAMMING, BotStates.LISTENING}
+        suppressed = {Phase.SPEAKING.value, Phase.JAMMING.value, Phase.LISTENING.value}
         # Suppress for 2s after last speech to prevent BMO's own audio from false-triggering
-        post_speech_cooldown = lambda: (time.time() - self.last_spoke_at) < 2.0
-        result = wait_for_wakeword(oww, self.stop_event, lambda: self.current_state, suppressed,
+        post_speech_cooldown = lambda: (time.time() - self.store.last_spoke_at) < 2.0
+        result = wait_for_wakeword(oww, self.stop_event, lambda: self.store.phase.value, suppressed,
                                    extra_suppress_fn=post_speech_cooldown)
         if not result and not self.stop_event.is_set():
-            self.set_state(BotStates.ERROR)
+            self.store.set_phase(Phase.ERROR)
             time.sleep(2)
         return result
 
@@ -420,27 +385,17 @@ class BotGUI:
                 bmo_print("TTS", "Piper returned no audio")
                 return
 
-            if msg is not None:
-                self.set_state(BotStates.SPEAKING, msg)
-            else:
-                self.current_state = BotStates.SPEAKING
-                self.anim.current_frame = 0
-                self.last_state_change = time.time()
+            self.store.set_phase(Phase.SPEAKING, msg=msg or "")
 
-            if not self.is_muted:
+            if not self.store.muted:
                 player.resume()
                 player.play(pcm)
             else:
                 time.sleep(1.5)
 
-            self.last_spoke_at = time.time()
-            if self.current_state == BotStates.SPEAKING:
-                if msg is not None:
-                    self.set_state(BotStates.IDLE, "Ready...")
-                else:
-                    self.current_state = BotStates.IDLE
-                    self.anim.current_frame = 0
-                    self.last_state_change = time.time()
+            self.store.mark_spoke()
+            if self.store.phase == Phase.SPEAKING:
+                self.store.set_phase(Phase.IDLE, msg="Ready...")
                 time.sleep(0.3)
 
         except Exception as e:
@@ -456,11 +411,11 @@ class BotGUI:
             time.sleep(minutes * 60)
             bmo_print("TIMER DONE", message)
 
-            while self.current_state in [BotStates.SPEAKING, BotStates.LISTENING]:
+            while self.store.phase in (Phase.SPEAKING, Phase.LISTENING):
                 time.sleep(1)
 
-            old_state = self.current_state
-            self.set_state(BotStates.HAPPY, "Reminder!")
+            old_phase = self.store.phase
+            self.store.set_phase(Phase.IDLE, expression="happy", msg="Reminder!")
             alert_proc = self.sounds.play("ack_sounds")
             if alert_proc:
                 alert_proc.wait()
@@ -468,8 +423,11 @@ class BotGUI:
             self.speak(message, msg="Reminder!")
 
             time.sleep(1)
-            if self.current_state == BotStates.IDLE:
-                self.set_state(old_state if old_state != BotStates.HAPPY else BotStates.IDLE, "Ready")
+            if self.store.phase == Phase.IDLE:
+                self.store.set_phase(
+                    old_phase if old_phase != Phase.IDLE else Phase.IDLE,
+                    msg="Ready",
+                )
 
         threading.Thread(target=timer_worker, daemon=True).start()
 
@@ -479,12 +437,16 @@ class BotGUI:
 
     def _dispatch_and_speak(self, user_text, on_music):
         """Run LLM dispatch and speak all result chunks. Returns the ActionResult."""
+        def _on_expression(expr):
+            self.store.set_expression(expr)
+            self.status_label.config(text=f"Feeling {expr}...")
+
         result = dispatch_stream(
             self.brain, user_text,
-            on_expression=lambda expr: self.set_state(expr, f"Feeling {expr}..."),
+            on_expression=_on_expression,
             on_timer=self.start_timer_thread,
             on_music=on_music,
-            valid_expressions=BotStates.VALID_EXPRESSIONS,
+            valid_expressions=VALID_EXPRESSIONS,
         )
 
         tts_start = time.time()
@@ -503,8 +465,8 @@ class BotGUI:
         time.sleep(1)  # Let UI settle
         boot_start = time.time()
 
-        # --- Boot sequence ---
-        self.set_state(BotStates.WARMUP, "Booting...")
+        # --- Boot sequence (stays in WARMUP, status label updates directly) ---
+        self.status_label.config(text="Booting...")
         t0 = time.time()
         init_audio(ALSA_DEVICE)
         atexit.register(shutdown_audio)
@@ -517,25 +479,25 @@ class BotGUI:
         self.sounds.play("boot_sounds")
         self.anim.current_frame = 1
 
-        self.set_state(BotStates.WARMUP, "Loading Brain...")
+        self.status_label.config(text="Loading Brain...")
         t0 = time.time()
         init_llm()
         bmo_print("BOOT", f"LLM (NPU): {time.time()-t0:.2f}s")
 
         self.anim.current_frame = 12
-        self.set_state(BotStates.WARMUP, "Loading Ears...")
+        self.status_label.config(text="Loading Ears...")
         t0 = time.time()
         init_stt()
         bmo_print("BOOT", f"STT (NPU): {time.time()-t0:.2f}s")
 
         self.anim.current_frame = 13
-        self.set_state(BotStates.WARMUP, "Loading Wake Word...")
+        self.status_label.config(text="Loading Wake Word...")
         t0 = time.time()
         try:
             oww = Model(wakeword_model_paths=[WAKE_WORD_MODEL])
         except Exception as e:
             bmo_print("WAKE", f"Failed to load model: {e}")
-            self.set_state(BotStates.ERROR, "Wake Word Error")
+            self.store.set_phase(Phase.ERROR, msg="Wake Word Error")
             return
         bmo_print("BOOT", f"Wake word (OWW): {time.time()-t0:.2f}s")
 
@@ -545,18 +507,18 @@ class BotGUI:
         time.sleep(0.5)
 
         bmo_print("BOOT", f"Total startup: {time.time()-boot_start:.2f}s")
-        self.set_state(BotStates.SPEAKING, "Ready!")
+        self.store.set_phase(Phase.SPEAKING, msg="Ready!")
         greeting_proc = self.sounds.play("greeting_sounds")
         if greeting_proc:
             threading.Thread(
                 target=lambda: (
                     greeting_proc.wait(),
-                    self.set_state(BotStates.IDLE, "Waiting...") if self.current_state == BotStates.SPEAKING else None,
+                    self.store.set_phase(Phase.IDLE, msg="Waiting...") if self.store.phase == Phase.SPEAKING else None,
                 ),
                 daemon=True,
             ).start()
         else:
-            self.set_state(BotStates.IDLE, "Waiting...")
+            self.store.set_phase(Phase.IDLE, msg="Waiting...")
 
         # --- Conversation loop ---
         while not self.stop_event.is_set():
@@ -564,15 +526,15 @@ class BotGUI:
                 continue
 
             # Record
-            self.set_state(BotStates.LISTENING, "Listening...")
+            self.store.set_phase(Phase.LISTENING, msg="Listening...")
             wav_file = self.record_audio()
 
             if not wav_file:
-                self.set_state(BotStates.IDLE, "Ready")
+                self.store.set_phase(Phase.IDLE, msg="Ready")
                 continue
 
             # Transcribe
-            self.set_state(BotStates.THINKING, "Transcribing...")
+            self.store.set_phase(Phase.THINKING, msg="Transcribing...")
             threading.Thread(target=self._play_thinking_loop, daemon=True).start()
 
             user_text = self.transcribe(wav_file)
@@ -580,30 +542,30 @@ class BotGUI:
             self.show_user_prompt(user_text)
 
             if len(user_text) < 2:
-                self.set_state(BotStates.IDLE, "Ready")
+                self.store.set_phase(Phase.IDLE, msg="Ready")
                 self._stop_thinking_audio()
                 continue
 
             # LLM
-            self.set_state(BotStates.THINKING, "Thinking...")
+            self.status_label.config(text="Thinking...")  # same phase, msg-only
             self._stop_thinking_audio()
 
             try:
                 def on_music():
                     def music_worker():
-                        while self.current_state in [BotStates.SPEAKING, BotStates.THINKING]:
+                        while self.store.phase in (Phase.SPEAKING, Phase.THINKING):
                             time.sleep(0.5)
                         self.speak(random.choice(t("music_intros")), msg="Getting ready to jam...")
                         bmo_print("MUSIC", "Starting music playback...")
                         music_proc = self.sounds.play("music")
                         if music_proc:
-                            self.set_state(BotStates.JAMMING, "Jamming!")
+                            self.store.set_phase(Phase.JAMMING, msg="Jamming!")
                             bmo_print("MUSIC", "Now playing! State set to JAMMING")
                             music_proc.wait()
                             bmo_print("MUSIC", "Playback finished")
                             time.sleep(1)
-                            if self.current_state == BotStates.JAMMING:
-                                self.set_state(BotStates.IDLE, "Ready")
+                            if self.store.phase == Phase.JAMMING:
+                                self.store.set_phase(Phase.IDLE, msg="Ready")
                         else:
                             bmo_print("MUSIC", "No music files found or muted!")
                             self.speak(t("no_music"))
@@ -612,7 +574,7 @@ class BotGUI:
                 result = self._dispatch_and_speak(user_text, on_music)
 
                 if result.take_photo:
-                    self.camera.handle_photo(user_text, lambda: self.current_state)
+                    self.camera.handle_photo(user_text, lambda: self.store.phase.value)
 
                 if result.voice_eq:
                     if self.voice_eq.is_visible():
@@ -626,20 +588,20 @@ class BotGUI:
 
                 if result.image_url:
                     self.speak(t("draw_image"))
-                    self.set_state(BotStates.DISPLAY_IMAGE, "Showing Image...")
+                    self.store.set_phase(Phase.DISPLAY_IMAGE, msg="Showing Image...")
                     bmo_print("IMAGE", f"Starting image display for: {result.image_url}")
                     download_and_display(
                         result.image_url,
                         self.background_label,
                         self.master,
-                        self._set_display_image,
+                        self.store.set_display_image,
                     )
 
             except Exception as e:
                 bmo_print("ERROR", f"LLM/TTS pipeline: {e}")
                 traceback.print_exc()
 
-            self.set_state(BotStates.IDLE, "Ready")
+            self.store.set_phase(Phase.IDLE, msg="Ready")
 
     # ------------------------------------------------------------------
     # Screensaver audio
@@ -648,35 +610,36 @@ class BotGUI:
     def screensaver_audio_loop(self):
         def display_image_cb(img_url):
             bmo_print("SCREENSAVER", f"Downloading image from: {img_url}")
-            self.set_state(BotStates.DISPLAY_IMAGE, "Visualizing...")
+            self.store.set_phase(Phase.DISPLAY_IMAGE, msg="Visualizing...")
             success = download_and_display(
                 img_url,
                 self.background_label,
                 self.master,
-                self._set_display_image,
+                self.store.set_display_image,
             )
             if success:
                 time.sleep(10)
-            if self.current_state == BotStates.DISPLAY_IMAGE:
-                self.set_state(BotStates.SCREENSAVER, "Sleeping...")
+            if self.store.phase == Phase.DISPLAY_IMAGE:
+                self.store.set_phase(Phase.SCREENSAVER, msg="Sleeping...")
 
         screensaver_loop(
             stop_event=self.stop_event,
-            get_state=lambda: self.current_state,
+            get_state=lambda: self.store.phase.value,
             set_state=self.set_state,
             speak_fn=self.speak,
             play_sound_fn=self.sounds.play,
-            is_muted_fn=lambda: self.is_muted,
+            is_muted_fn=lambda: self.store.muted,
             display_image_fn=display_image_cb,
-            get_last_state_change=lambda: self.last_state_change,
+            get_last_state_change=lambda: self.store.last_phase_change,
+            get_expression=lambda: self.store.expression,
             get_last_audio_time=lambda: self.last_screensaver_audio_time,
             set_last_audio_time=lambda t: setattr(self, 'last_screensaver_audio_time', t),
             is_llm_ready_fn=is_llm_ready,
             get_llm_fn=_get_llm,
-            screensaver_state=BotStates.SCREENSAVER,
-            display_image_state=BotStates.DISPLAY_IMAGE,
-            expression_states=[BotStates.HEART, BotStates.SLEEPY, BotStates.STARRY_EYED, BotStates.DIZZY],
-            persona_states=[BotStates.FOOTBALL, BotStates.DETECTIVE, BotStates.SIR_MANO, BotStates.LOW_BATTERY, BotStates.BEE],
+            screensaver_state=Phase.SCREENSAVER.value,
+            display_image_state=Phase.DISPLAY_IMAGE.value,
+            expression_states=["heart", "sleepy", "starry_eyed", "dizzy"],
+            persona_states=["football", "detective", "sir_mano", "low_battery", "bee"],
             alsa_device=ALSA_DEVICE,
         )
 
