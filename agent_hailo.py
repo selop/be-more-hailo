@@ -21,6 +21,7 @@ from core.meter import MicMeter
 from core.bubble import ThoughtBubble
 from core.voice_eq import VoiceEQOverlay
 from core.sounds import SoundManager
+from core.timer_clock import TimerClock
 from core.animation import AnimationEngine
 from core.camera import CameraHandler
 from core.image_display import download_and_display
@@ -140,6 +141,18 @@ class BotGUI(TurnUI):
 
         self.bubble = ThoughtBubble(master)
         self.voice_eq = VoiceEQOverlay(master)
+
+        # Countdown clock, visible while a timer runs. It steps aside for
+        # photos, generated pictures and the voice tuner.
+        self.timer_clock = TimerClock(
+            master,
+            get_timers=self.conversation.active_timers,
+            is_hidden=lambda: (
+                self.store.display_image is not None
+                or self.store.phase in (Phase.CAPTURING, Phase.WARMUP)
+                or self.voice_eq.is_visible()
+            ),
+        )
 
         self.mute_label = tk.Label(
             master,

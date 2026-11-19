@@ -17,11 +17,12 @@ import traceback
 
 from . import audio_input, dispatch, trace
 from .audio_input import record_until_silence, wait_for_wakeword
-from .config import ALSA_DEVICE, WAKE_WORD_MODEL, say, t
+from .config import ALSA_DEVICE, LANGUAGE, WAKE_WORD_MODEL, say, t
 from .llm import Brain, init_llm
 from .log import bmo_print
 from .state import Phase, VALID_EXPRESSIONS
 from .stt import init_stt, transcribe_audio
+from .timers import format_duration
 from .tts import (
     clean_text_for_speech, get_player, get_synthesizer, init_audio,
     precache_voice_sounds, shutdown_audio,
@@ -104,6 +105,9 @@ class Conversation:
         self.brain = brain if brain is not None else Brain()
         # Handle of the currently playing thinking sound (a subprocess)
         self.thinking_audio_process = None
+        # Running timers, for the on-screen clock (see active_timers())
+        self._timers = []
+        self._timers_lock = threading.Lock()
         # Test turns waiting to run (see inject())
         self._injections = queue.Queue()
         # Record every phase change of a turn in its trace
@@ -205,11 +209,36 @@ class Conversation:
     # Timers
     # ------------------------------------------------------------------
 
+    def active_timers(self):
+        """Running timers, soonest first. Each is a dict with ``remaining_s``,
+        ``total_s`` and ``message``. Safe to call from any thread."""
+        now = time.time()
+        with self._timers_lock:
+            timers = [
+                {"remaining_s": entry["ends_at"] - now, "total_s": entry["total_s"], "message": entry["message"]}
+                for entry in self._timers
+            ]
+        return sorted(timers, key=lambda timer: timer["remaining_s"])
+
+    def _add_timer(self, minutes, message):
+        entry = {"ends_at": time.time() + minutes * 60, "total_s": minutes * 60, "message": message}
+        with self._timers_lock:
+            self._timers.append(entry)
+        return entry
+
+    def _remove_timer(self, entry):
+        with self._timers_lock:
+            if entry in self._timers:
+                self._timers.remove(entry)
+
     def start_timer(self, minutes, message):
+        entry = self._add_timer(minutes, message)
+
         def timer_worker():
             bmo_print("TIMER SET", f"for {minutes} minutes. Message: {message}")
             trace.event("timer_set", minutes=minutes, message=message)
             time.sleep(minutes * 60)
+            self._remove_timer(entry)
             bmo_print("TIMER DONE", message)
             trace.event("timer_done", minutes=minutes, message=message)
 
@@ -322,6 +351,11 @@ class Conversation:
         """Answer *user_text*: generate, speak, then run any requested action."""
         result = self._dispatch_and_speak(user_text)
         trace.set("reply_chunks", len(result.speak_chunks))
+
+        if result.timer_minutes is not None and not result.speak_chunks:
+            # The timer was started without the model saying anything
+            # (keyword route, or a bare action): confirm it out loud.
+            self.speak(say("timer_set", duration=format_duration(result.timer_minutes * 60, LANGUAGE)))
 
         if result.take_photo:
             self.ui.take_photo(user_text)

@@ -73,6 +73,10 @@ def status(conversation) -> dict:
         "expression": store.expression,
         "muted": store.muted,
         "showing_image": store.display_image is not None,
+        "timers": [
+            {"remaining_s": round(timer["remaining_s"], 1), "total_s": timer["total_s"], "message": timer["message"]}
+            for timer in getattr(conversation, "active_timers", lambda: [])()
+        ],
         "llm_ready": is_llm_ready(),
         "stt_on_npu": is_stt_npu(),
         "history_messages": max(len(getattr(conversation.brain, "history", [])) - 1, 0),

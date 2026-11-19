@@ -14,9 +14,9 @@ Two rules shape the structure:
 | **Hearing** | Getting the user's words in: mic, wake word, endpointing, transcription | `core/audio_input.py`, `core/stt.py`, `core/meter.py`, `tests/test_wakeword.py`, `scripts/find_mic.py`, `scripts/list_devices.py`, `scripts/benchmark_stt.py` |
 | **Voice** | Getting speech and sounds out: synthesis, playback, voice filter | `core/tts.py`, `core/sounds.py`, `core/voice_eq.py`, `scripts/benchmark_tts.py` |
 | **Brain** | What is said: conversation history, memory, web search | `core/llm.py`, `core/search.py`, `get_system_prompt()` in `core/config.py`, `scripts/benchmark_llm.py` |
-| **Intent** | Deciding what the user wants done and turning model output into actions | `core/actions.py`, `core/dispatch.py` |
+| **Intent** | Deciding what the user wants done and turning model output into actions | `core/actions.py`, `core/dispatch.py`, `core/timers.py`, `tests/test_timers.py` |
 | **NPU runtime** | Model lifecycle on the Hailo-10H: VDevice, load, release, VLM swap | `core/npu.py`, `core/camera.py`, `models/`, `scripts/hailo_detect.py` |
-| **Face** | What is shown: phase and expression state, animation, overlays, screensaver, the Tkinter shell | `core/state.py`, `core/animation.py`, `core/bubble.py`, `core/image_display.py`, `core/screensaver.py`, `agent_hailo.py` |
+| **Face** | What is shown: phase and expression state, animation, overlays, screensaver, the Tkinter shell | `core/state.py`, `core/animation.py`, `core/bubble.py`, `core/timer_clock.py`, `core/image_display.py`, `core/screensaver.py`, `agent_hailo.py` |
 | **Conversation** | One turn end to end: listen, think, speak, act; plus speaking, timers, music | `core/turn.py`, `tests/test_turn.py` |
 | **Platform** | Install, services, deploy, settings, logging, the character loader | `setup.sh`, `setup_services.sh`, `start_agent.sh`, `requirements.txt`, `core/log.py`, `core/config.py`, `core/character.py`, `tests/test_character.py` |
 | **Character** (data, not code) | Who the assistant is | `characters/bmo/character.toml`, `faces/`, `sounds/`, `wakeword.onnx`, `generate_faces.py`, `scripts/generate_sounds.py`, `scripts/generate_chiptunes.py`, `scripts/convert_music.py` |

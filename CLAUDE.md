@@ -24,7 +24,7 @@ sudo systemctl start bmo-gui
 sudo journalctl -u bmo-gui -f  # view logs
 ```
 
-Tests that need no hardware live in `tests/` and run with `pytest tests/` or directly (`python tests/test_character.py`, `python tests/test_turn.py`, `python tests/test_brain.py`).
+Tests that need no hardware live in `tests/` and run with `pytest tests/` or directly (`python tests/test_character.py`, `python tests/test_turn.py`, `python tests/test_brain.py`, `python tests/test_timers.py`).
 
 To test on the device without speaking, use `scripts/bmo-remote.sh` (see `docs/observability.md`): `say "..." --quiet` runs a real turn from text and prints its trace, `turns`/`stats` read past turns, `screenshot` captures the display. Verify a change there before calling it done. Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually on the Pi.
 
@@ -47,6 +47,7 @@ agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──�
                          ├── actions.py      # Keyword matching, response cleaning (pure functions, no HW)
                          ├── llm.py          # Brain class: conversation history + inference orchestration
                          ├── dispatch.py     # Stream chunk → action dispatch (camera, music, timer)
+                         ├── timers.py       # Recognises timer and reminder requests before the LLM (pure functions)
                          ├── audio_input.py  # Wake word detection + mic recording
                          ├── screensaver.py  # Idle thought generation + animation loop
                          ├── tts.py          # Piper TTS with persistent AudioPlayer
@@ -73,10 +74,11 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 ### Key Design Patterns
 
 - **State store (`core/state.py`)**: Centralized `StateStore` separates *phase* (what BMO is doing: `Phase.IDLE`, `Phase.SPEAKING`, etc.) from *expression* (what face to display: `"happy"`, `"detective"`, etc.). Phase changes are thread-safe with hooks; expressions change independently. Use `store.set_phase()` for phase transitions, `store.set_expression()` for face-only changes. See `docs/state-store.md` for full design and `/use-state-store` skill for implementation guidance.
-- **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes
+- **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes. Requests the small model does not handle reliably are recognised before the LLM in `core/actions.py`: camera, image, music, voice tuner (keywords) and timers/reminders (`core/timers.py`)
 - **Sentence-streaming TTS**: Response is split sentence-by-sentence; TTS plays each sentence as LLM continues generating
 - **System prompt caching**: `llm.save_context()` / `llm.load_context()` caches system prompt KV state at startup — not re-processed every turn
 - **Turn loop outside the GUI**: `core.turn.Conversation` runs boot and the turn loop on a worker thread and reports to the display through the `TurnUI` callbacks; it owns `speak()`, timers and music
+- **Timer clock**: `Conversation.active_timers()` lists running timers; `core/timer_clock.py` polls it from the Tk loop and draws the countdown, so no worker thread touches the widget
 - **Wake word suppression**: Wake word detection is suppressed during `Phase.SPEAKING` and `Phase.JAMMING` to prevent BMO's own audio from triggering false detections
 - **Pronunciation system**: User corrects pronunciation → LLM appends `!PRONOUNCE: word=phonetic` → saved to `pronunciations.json` → Piper substitutions
 - **VLM subprocess swap**: Main process releases STT+LLM+VDevice → forks child → child loads VLM → inference → child exits → parent reloads LLM+STT+system prompt cache

@@ -6,27 +6,29 @@ Last sweep: 2026-11-19. The web interface was removed the same day; WEB-1 was dr
 
 | Rank | ID | Weak link | Domain | Status |
 |---|---|---|---|---|
-| 1 | INTENT-3 | Timers do not work: the LLM does not emit the timer action | Intent, Brain | open |
-| 2 | INTENT-1 | Speech waits for the whole LLM reply | Intent, Conversation | open |
-| 3 | BRAIN-1 | Clock frozen at boot; prompt and context budget issues | Brain, NPU runtime | open |
-| 4 | NPU-1 | A failed photo leaves models unloaded; nothing locks the NPU | NPU runtime | open |
-| 5 | TEST-1 | No utterance eval set; tests cover only part of the engine | Intent, Brain | partly fixed |
-| 6 | INTENT-2 | Intent routing misfires on substrings | Intent | open |
-| 7 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | open |
-| 8 | BRAIN-2 | Pronunciation learning does not work on the device | Brain | open |
-| 9 | FACE-1 | A generated image is never cleared | Face | fixed (uncommitted) |
-| 10 | VOICE-1 | A reply cannot be cancelled; speakers cut each other off | Voice, Conversation | open |
-| 11 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | open |
-| 12 | HEAR-3 | Hearing failures are silent | Hearing, Conversation | open |
-| 13 | BRAIN-3 | No persistent memory; timers lost on restart | Brain, Conversation | open |
-| 14 | PLAT-1 | Boot runs pip; cold boot takes about five minutes | Platform | partly fixed |
-| 15 | FACE-2 | Emotion faces requested by the LLM are overwritten before they show | Face, Conversation | open |
+| 1 | INTENT-1 | Speech waits for the whole LLM reply | Intent, Conversation | open |
+| 2 | BRAIN-1 | Clock frozen at boot; prompt and context budget issues | Brain, NPU runtime | open |
+| 3 | NPU-1 | A failed photo leaves models unloaded; nothing locks the NPU | NPU runtime | open |
+| 4 | TEST-1 | No utterance eval set; tests cover only part of the engine | Intent, Brain | partly fixed |
+| 5 | INTENT-2 | Intent routing misfires on substrings | Intent | open |
+| 6 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | open |
+| 7 | BRAIN-2 | Pronunciation learning does not work on the device | Brain | open |
+| 8 | FACE-1 | A generated image is never cleared | Face | fixed (uncommitted) |
+| 9 | VOICE-1 | A reply cannot be cancelled; speakers cut each other off | Voice, Conversation | open |
+| 10 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | open |
+| 11 | HEAR-3 | Hearing failures are silent | Hearing, Conversation | open |
+| 12 | BRAIN-3 | No persistent memory; timers lost on restart | Brain, Conversation | open |
+| 13 | PLAT-1 | Boot runs pip; cold boot takes about five minutes | Platform | partly fixed |
+| 14 | FACE-2 | Emotion faces requested by the LLM are overwritten before they show | Face, Conversation | open |
+| 15 | INTENT-3 | Timers did not work: the LLM does not emit the timer action | Intent, Brain | fixed (uncommitted) |
 | 16 | CHAR-1 | The character was hardcoded across the engine | all | fixed (uncommitted) |
 
-## INTENT-3. Timers do not work: the LLM does not emit the timer action
-Evidence: measured on the Pi on 2026-11-19 with two injected turns, "set a timer for 90 seconds". The model answered "I'm sorry, I can't do that..." and "I'm just a small robot friend, after all..." with no `set_timer` JSON in either reply (`llm_raw` in the turn traces). Nothing matches timers before the LLM (`core/actions.py:83`), so the feature depends entirely on the 1.5B model following the prompt.
-Cost: a headline feature fails, and BMO says it cannot do it.
-Smallest fix: parse timer requests deterministically before the LLM ("set a timer for N seconds/minutes", "remind me in N minutes to ...") and speak a confirmation line from the character pack.
+## INTENT-3. Timers did not work (fixed 2026-11-19, uncommitted)
+Was: "set a timer for 90 seconds" got "I'm sorry, I can't do that" and no timer, twice, because the feature depended on the 1.5B model emitting the timer action.
+Fix: `core/timers.py` recognises timer and timed-reminder requests before the LLM (`detect_pre_llm_action()` in `core/actions.py`), and `Conversation.respond()` speaks a confirmation from the character pack (`lines.timer_set`, `lines.reminder`). Covered by `tests/test_timers.py` and `tests/test_turn.py`.
+Measured on the Pi: a 10 s timer and a 15 s reminder were confirmed after 0.3 s and 0.5 s and both fired on time (`timer_set` / `timer_done` in `logs/events.jsonl`).
+A countdown clock (`core/timer_clock.py`) shows the remaining time in the top-left corner while a timer runs, confirmed by screenshots; spoken requests were recognised too ("Start timer for 44 seconds.", response 1.0 s).
+Still open: English phrasing only; no cancel or list; timers are lost on restart (BRAIN-3); reminders at a clock time ("at 5 pm") still go to the LLM.
 
 ## INTENT-1. Speech waits for the whole LLM reply
 Evidence: `core/dispatch.py:60` collects every chunk into `speak_chunks` before returning; `core/turn.py:258` speaks only afterwards.

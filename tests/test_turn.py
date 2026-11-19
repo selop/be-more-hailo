@@ -168,6 +168,47 @@ def test_timer_music_and_expression_actions_are_routed():
         assert h.spoken == ["Okay!"]            # JSON is never spoken
 
 
+def test_spoken_timer_request_starts_a_timer_and_confirms_it():
+    with Harness() as h:                        # real Brain: recognised before the LLM
+        timers = []
+        h.conv.start_timer = lambda minutes, message: timers.append((minutes, message))
+        injection = h.conv.inject(text="Set a timer for 90 seconds.")
+        h.conv.run_turn(oww=None)
+        assert timers == [(1.5, say("timer_done"))]
+        assert len(h.spoken) == 1 and "1 minute and 30 seconds" in h.spoken[0]
+        assert injection.result["route"] == "keyword"
+        assert injection.result["actions"][0]["action"] == "set_timer"
+
+
+def test_reminder_message_is_what_gets_spoken_when_it_is_due():
+    with Harness() as h:
+        timers = []
+        h.conv.start_timer = lambda minutes, message: timers.append((minutes, message))
+        h.conv.respond("remind me in ten minutes to call my mom")
+        assert timers[0][0] == 10 and "call your mom" in timers[0][1]
+
+
+def test_timer_action_with_spoken_reply_is_not_confirmed_twice():
+    brain = ScriptedBrain(['Okay, timer started! {"action": "set_timer", "minutes": 2}'])
+    with Harness(brain) as h:
+        h.conv.start_timer = lambda minutes, message: None
+        h.conv.respond("timer please")
+        assert h.spoken == ["Okay, timer started!"]
+
+
+def test_running_timers_are_listed_soonest_first_until_they_fire():
+    with Harness() as h:
+        long_timer = h.conv._add_timer(10, "ten minutes")
+        short_timer = h.conv._add_timer(0.5, "thirty seconds")
+        timers = h.conv.active_timers()
+        assert [t["message"] for t in timers] == ["thirty seconds", "ten minutes"]
+        assert 29 <= timers[0]["remaining_s"] <= 30 and timers[0]["total_s"] == 30
+        h.conv._remove_timer(short_timer)
+        assert [t["message"] for t in h.conv.active_timers()] == ["ten minutes"]
+        h.conv._remove_timer(long_timer)
+        assert h.conv.active_timers() == []
+
+
 def test_photo_request_reaches_the_ui():
     with Harness() as h:                        # real Brain: keyword route, no LLM
         h.conv.respond("take a photo")
