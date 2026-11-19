@@ -22,9 +22,8 @@ def create_favicon():
     img_cropped = img.crop((left, top, right, bottom))
     img_resized = img_cropped.resize((512, 512), Image.Resampling.LANCZOS)
     
-    # Save as favicon.png in static folder
-    os.makedirs('static', exist_ok=True)
-    save_path = 'static/favicon.png'
+    # Save as favicon.png in the project root (used as the desktop shortcut icon)
+    save_path = 'favicon.png'
     img_resized.save(save_path)
     print(f"Favicon created successfully at {save_path}")
 

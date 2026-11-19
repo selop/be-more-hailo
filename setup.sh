@@ -221,7 +221,7 @@ cat <<EOF > ~/Desktop/BMO.desktop
 Name=BMO
 Comment=Launch BMO Agent
 Exec=bash -c 'cd "$PWD" && ./start_agent.sh'
-Icon=$PWD/static/favicon.png
+Icon=$PWD/favicon.png
 Terminal=true
 Type=Application
 Categories=Utility;Application;
@@ -230,4 +230,4 @@ chmod +x ~/Desktop/BMO.desktop
 mkdir -p ~/.local/share/applications/
 cp ~/Desktop/BMO.desktop ~/.local/share/applications/
 
-echo -e "${GREEN}Setup complete. Run './start_agent.sh' for on-device mode or './start_web.sh' for the web interface.${NC}"
+echo -e "${GREEN}Setup complete. Run './start_agent.sh' to start BMO.${NC}"

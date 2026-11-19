@@ -2,7 +2,6 @@
 
 <p align="center">
   <img src="bmo_irl.jpg" height="300" alt="BMO On-Device" />
-  <img src="bmo-web.png" height="300" alt="BMO Web Interface" />
 </p>
 
 On-device conversational AI agent (BMO from Adventure Time) for **Raspberry Pi 5 + Hailo-10H NPU**. Wake word, STT, LLM, TTS, vision — all local, no cloud.
@@ -102,28 +101,17 @@ source venv/bin/activate
 
 # On-device GUI (fullscreen Tkinter on HDMI/DSI display)
 ./start_agent.sh
-
-# Web interface (browser at http://<pi-ip>:8080)
-./start_web.sh
 ```
 
 ### Systemd services (production)
 
-Install both services so BMO starts automatically on boot:
+Install the service so BMO starts automatically on boot:
 
 ```bash
 ./setup_services.sh
 ```
 
-This creates two systemd units — **`bmo-gui`** (Tkinter fullscreen) and **`bmo-web`** (FastAPI on port 8080) — enables them on boot, and starts them immediately. You typically only need one; disable the other:
-
-```bash
-# Run only the GUI (disable web)
-sudo systemctl disable --now bmo-web
-
-# Run only the web UI (disable GUI)
-sudo systemctl disable --now bmo-gui
-```
+This creates the **`bmo-gui`** systemd unit (Tkinter fullscreen), enables it on boot, and starts it immediately.
 
 Common service commands:
 
@@ -138,17 +126,6 @@ sudo systemctl status bmo-gui
 
 # Follow logs (Ctrl+C to quit)
 sudo journalctl -u bmo-gui -f
-
-# Same commands work for bmo-web
-sudo journalctl -u bmo-web -f
-```
-
-### Kiosk mode (web)
-
-Opens Chromium fullscreen on the Pi's display pointing at the web UI:
-
-```bash
-./setup_web.sh
 ```
 
 ---
