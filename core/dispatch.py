@@ -23,6 +23,7 @@ class ActionResult:
     take_photo: bool = False
     music_triggered: bool = False
     voice_eq: bool = False
+    timer_minutes: float | None = None     # set when a timer was started
     image_url: str | None = None
     speak_chunks: list[str] = field(default_factory=list)
 
@@ -98,6 +99,7 @@ def dispatch_stream(
                     msg = action_data.get("message", say("timer_done"))
                     if on_timer:
                         on_timer(mins, msg)
+                    result.timer_minutes = mins
                     chunk = chunk.replace(json_match.group(0), '').strip()
 
                 elif action == "play_music":

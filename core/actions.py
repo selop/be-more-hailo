@@ -10,6 +10,7 @@ import re
 import urllib.parse
 
 from .config import CHARACTER, say
+from .timers import parse_timer_request, second_person
 
 
 # ── Keyword lists (single source of truth) ────────────────────────────────
@@ -84,10 +85,19 @@ def detect_pre_llm_action(user_text: str) -> dict | None:
     """Check *user_text* against keyword lists and return a pre-built action
     dict, or ``None`` if no shortcut matches.
 
-    Returned dict always has an ``"action"`` key (``"take_photo"``,
-    ``"display_image"``, or ``"play_music"``).
+    Returned dict always has an ``"action"`` key (``"set_timer"``,
+    ``"take_photo"``, ``"display_image"``, ``"play_music"`` or ``"voice_eq"``).
     """
     lower = user_text.lower()
+
+    # Timers first: "remind me in 5 minutes to take a photo" is a reminder
+    timer = parse_timer_request(user_text)
+    if timer is not None:
+        seconds, reminder = timer
+        action = {"action": "set_timer", "minutes": round(seconds / 60, 4)}
+        if reminder:
+            action["message"] = say("reminder", message=second_person(reminder))
+        return action
 
     if any(kw in lower for kw in CAMERA_KEYWORDS):
         return {"action": "take_photo"}

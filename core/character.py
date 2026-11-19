@@ -26,7 +26,8 @@ DEFAULT_CHARACTER = "bmo"
 REQUIRED_PROMPTS = ("system", "vision", "search_summary", "live_data", "idle_system", "idle_thought")
 REQUIRED_LINES = (
     "empty_reply", "confused_reset", "think_error", "stream_error",
-    "vision_missing", "vision_timeout", "vision_error", "timer_done",
+    "vision_missing", "vision_timeout", "vision_error",
+    "timer_set", "timer_done", "reminder",
     "music_intros", "no_music", "camera_intros", "no_camera", "camera_error",
     "draw_image", "eq_open", "eq_close", "eq_test", "eq_title",
 )
@@ -109,11 +110,13 @@ class Character:
             value = lines.get("en", {}).get(key, key)
         return value
 
-    def say(self, key: str, language: str = "en") -> str:
+    def say(self, key: str, language: str = "en", **values) -> str:
         """Like :meth:`line`, but always one string: a random pick if the
-        line has alternatives."""
+        line has alternatives. Keyword arguments fill ``${placeholders}``
+        in the line."""
         value = self.line(key, language)
-        return random.choice(value) if isinstance(value, list) else value
+        text = random.choice(value) if isinstance(value, list) else value
+        return Template(text).safe_substitute(**values) if values else text
 
     def normalize_name(self, text: str) -> str:
         """Replace misheard or misspelled forms of the name with the name."""

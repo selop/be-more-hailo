@@ -218,13 +218,27 @@ stream_error = "I'm having trouble right now."
 vision_missing = "BMO's vision model isn't installed yet. Run setup.sh to download it!"
 vision_timeout = "BMO looked too long and got dizzy! Try again?"
 vision_error = "I tried to look, but my eyes aren't working right now."
+# Spoken when a timer starts. Placeholder: ${duration} ("5 minutes").
+timer_set = [
+    "Okay! BMO set a timer for ${duration}.",
+    "Timer set for ${duration}! BMO is counting.",
+    "BMO will tell you in ${duration}!",
+]
 timer_done = "Timer is up!"
+# Spoken when a timed reminder is due. Placeholder: ${message} ("call your mom").
+reminder = "BMO has a reminder for you: ${message}!"
 eq_open = "Opening BMO's voice tuner!"
 eq_close = "Closing BMO's voice tuner!"
 eq_test = "Hello! BMO is tuning their voice!"
 eq_title = "BMO VOICE TUNER"
 
 [lines.de]
+timer_set = [
+    "Okay! BMO hat einen Timer auf ${duration} gestellt.",
+    "Timer laeuft! BMO sagt in ${duration} Bescheid.",
+]
+timer_done = "Der Timer ist abgelaufen!"
+reminder = "BMO hat eine Erinnerung fuer dich: ${message}!"
 music_intros = [
     "Oh ja! BMO legt jetzt los!",
     "Zeit fuer Musik! La la la!",

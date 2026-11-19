@@ -117,6 +117,7 @@ def t(key):
     return CHARACTER.line(key, LANGUAGE)
 
 
-def say(key):
-    """Like :func:`t`, but always one string (a random pick from a list)."""
-    return CHARACTER.say(key, LANGUAGE)
+def say(key, **values):
+    """Like :func:`t`, but always one string (a random pick from a list).
+    Keyword arguments fill ``${placeholders}`` in the line."""
+    return CHARACTER.say(key, LANGUAGE, **values)
