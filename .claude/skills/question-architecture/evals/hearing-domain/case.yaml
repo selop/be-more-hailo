@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: hearing-domain
+expected_outcome: |
+  A review limited to the hearing domain and its seams: the files the agent owns, the interfaces it must keep stable, and ranked weak links in that area with file and line evidence.

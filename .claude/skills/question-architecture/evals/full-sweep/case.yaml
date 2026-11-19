@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: full-sweep
+expected_outcome: |
+  A short ranked list of architectural weak links, each backed by a file and line, saying whether it was read from code, measured or estimated, with an owning domain, a smallest fix, a recommended starting order, and a few questions for the user.
