@@ -17,7 +17,7 @@ os.environ["TRACE_DIR"] = tempfile.mkdtemp(prefix="bmo-test-trace-")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from core.display_server import DisplayServer, StateMirror, list_face_frames, speech_envelope  # noqa: E402
+from core.display_server import DisplayServer, StateMirror, speech_envelope  # noqa: E402
 from core.state import Phase, StateStore  # noqa: E402
 
 
@@ -67,19 +67,15 @@ def test_page_library_and_configuration_are_served():
         assert status == 200 and "javascript" in content_type and len(body) > 100_000
         config = json.loads(get(display, "/config.json")[2])
         assert config["name"] and config["theme"]["face_bg"].startswith("#")
-        assert "idle" in config["faces"] and config["screensaver"]
-        assert config["frame_ms"]["speaking"] == 90
+        assert config["screensaver"]
     finally:
         display.stop()
 
 
-def test_face_frames_are_served_and_nothing_outside_the_folders():
+def test_nothing_outside_the_page_folder_is_served():
     display = serve()
     try:
-        frames = list_face_frames()
-        status, content_type, body = get(display, f"/faces/idle/{frames['idle'][0]}")
-        assert status == 200 and content_type == "image/png" and body[:4] == b"\x89PNG"
-        for path in ("/faces/../core/config.py", "/../CLAUDE.md", "/vendor/../../CLAUDE.md", "/nope.html"):
+        for path in ("/../core/config.py", "/../CLAUDE.md", "/vendor/../../CLAUDE.md", "/faces/idle/idle_01.png", "/nope.html"):
             try:
                 get(display, path)
                 assert False, f"{path} should not be served"

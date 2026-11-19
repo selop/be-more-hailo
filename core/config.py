@@ -62,8 +62,7 @@ VOICE_LPF_ORDER = int(os.environ.get("VOICE_LPF_ORDER", str(_voice_filter["order
 VOICE_EQ_FILE = CHARACTER.asset("voice_eq")
 PRONUNCIATION_FILE = CHARACTER.asset("pronunciations")
 
-# Asset folders of the active character
-FACES_DIR = CHARACTER.asset("faces")
+# Asset folder of the active character
 SOUNDS_DIR = CHARACTER.asset("sounds")
 
 def _load_voice_eq():

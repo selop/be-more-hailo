@@ -108,7 +108,7 @@ Smallest fix: keep a requested expression across the `SPEAKING` transition, or a
 Fix: `characters/bmo/character.toml` holds the name, prompts, spoken lines, expressions, personas, theme, voice settings and idle topics; `core/character.py` loads the pack chosen by `CHARACTER`. `tests/test_character.py` fails if any engine string literal contains a character's name.
 Still open:
 - BMO's faces, sounds and wake word stay in their original folders; the pack points at them through `[assets]`.
-- `generate_faces.py` and `scripts/generate_sounds.py` are BMO-specific asset tools outside the pack.
+- `scripts/generate_sounds.py` is a BMO-specific asset tool outside the pack, and the poses in `face/index.html` are BMO's face.
 - The system prompt in the pack mixes personality with the engine's action protocol, so a new character has to copy the protocol text.
 - Engine identifiers (`bmo_print`, `apply_bmo_border`, `BMO_LANGUAGE`, the `bmo-gui` service) and many docstrings still carry the name.
 

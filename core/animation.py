@@ -6,7 +6,7 @@ import time
 
 from PIL import Image, ImageTk
 
-from .config import CHARACTER, FACES_DIR
+from .config import CHARACTER
 from .log import bmo_print
 
 
@@ -79,35 +79,11 @@ class AnimationEngine:
     # ------------------------------------------------------------------
 
     def _load(self, all_states):
-        base = FACES_DIR
-        for state in all_states:
-            path = os.path.join(base, state)
-            self.animations[state] = []
-            if os.path.exists(path):
-                files = sorted(f for f in os.listdir(path) if f.lower().endswith(".png"))
-                for f in files:
-                    img = Image.open(os.path.join(path, f)).resize((self.w, self.h))
-                    self.animations[state].append(ImageTk.PhotoImage(img))
-
-        # Screensaver sequences — only expressions that make sense without audio
+        """Nothing to load: faces are drawn live by the page in ``face/``.
+        This engine remains for the idle-to-screensaver timer and the
+        status label of the fallback window."""
+        self.animations = {}
         self.screensaver_sequences = []
-        for state_dir in self.SCREENSAVER_STATES:
-            path = os.path.join(base, state_dir)
-            if not os.path.isdir(path):
-                continue
-            files = sorted(f for f in os.listdir(path) if f.lower().endswith(".png"))
-            if not files:
-                continue
-            seq_frames = []
-            for f in files:
-                try:
-                    img = Image.open(os.path.join(path, f)).resize((self.w, self.h))
-                    seq_frames.append(ImageTk.PhotoImage(img))
-                except Exception as e:
-                    bmo_print("SCREENSAVER", f"Failed to load image {f}: {e}")
-            if seq_frames:
-                self.screensaver_sequences.append((state_dir, seq_frames))
-
         self._rebuild_screensaver_frames()
 
     def _rebuild_screensaver_frames(self):

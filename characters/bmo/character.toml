@@ -17,7 +17,6 @@ heard_as = ["Beemo", "Bemo"]
 [assets]
 # Paths relative to the project root. BMO's assets still sit in their
 # original locations; a new pack would normally use characters/<pack>/...
-faces = "faces"
 sounds = "sounds"
 wakeword = "wakeword.onnx"
 pronunciations = "pronunciations.json"
@@ -49,14 +48,14 @@ poutine = "poo-teen"
 bmo = "beemo"
 
 [face]
-# Emotion faces the LLM may request. Each needs a folder under assets.faces.
+# Emotion faces the LLM may request. Each needs a pose in face/index.html.
 expressions = ["happy", "sad", "angry", "surprised", "sleepy", "dizzy", "cheeky", "heart", "starry_eyed", "confused"]
-# Persona gags shown by the screensaver. Each needs a faces folder; an
+# Persona gags shown by the screensaver. Each needs a pose in face/index.html; an
 # optional sound goes in <sounds>/personas/<name>.wav.
 personas = ["football", "detective", "sir_mano", "low_battery", "bee"]
 # Faces the screensaver cycles through when bored.
 idle_expressions = ["heart", "sleepy", "starry_eyed", "dizzy"]
-# Face folders the silent screensaver animation cycles through.
+# Faces the silent screensaver wanders through.
 screensaver = [
     "idle", "happy", "sleepy", "heart", "starry_eyed",
     "cheeky", "dizzy", "confused",

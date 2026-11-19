@@ -73,7 +73,6 @@ fi
 echo -e "${YELLOW}[4/13] Creating asset folders...${NC}"
 mkdir -p piper models
 mkdir -p sounds/greeting_sounds sounds/thinking_sounds sounds/ack_sounds sounds/error_sounds
-mkdir -p faces/idle faces/listening faces/thinking faces/speaking faces/error faces/warmup
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Piper TTS engine

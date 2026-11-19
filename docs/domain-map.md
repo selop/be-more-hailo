@@ -19,7 +19,7 @@ Two rules shape the structure:
 | **Face** | What is shown: phase and expression state, animation, overlays, screensaver, the Tkinter shell | `core/state.py`, `core/animation.py`, `core/bubble.py`, `core/timer_clock.py`, `core/image_display.py`, `core/screensaver.py`, `agent_hailo.py`, `face/` (the live three.js face), `core/display_server.py`, `scripts/face_demo.py`, `tests/test_display.py` |
 | **Conversation** | One turn end to end: listen, think, speak, act; plus speaking, timers, music | `core/turn.py`, `tests/test_turn.py` |
 | **Platform** | Install, services, deploy, settings, logging, the character loader | `setup.sh`, `setup_services.sh`, `start_agent.sh`, `requirements.txt`, `core/log.py`, `core/config.py`, `core/character.py`, `tests/test_character.py` |
-| **Character** (data, not code) | Who the assistant is | `characters/bmo/character.toml`, `faces/`, `sounds/`, `wakeword.onnx`, `generate_faces.py`, `scripts/generate_sounds.py`, `scripts/generate_chiptunes.py`, `scripts/convert_music.py` |
+| **Character** (data, not code) | Who the assistant is | `characters/bmo/character.toml`, `sounds/`, `wakeword.onnx`, `generate_faces.py`, `scripts/generate_sounds.py`, `scripts/generate_chiptunes.py`, `scripts/convert_music.py` |
 
 `cli_chat.py` is a minimal Brain harness. The web interface (`web_app.py`, `templates/`) was removed on 2026-11-19; the assistant runs on the Pi only.
 
@@ -73,7 +73,8 @@ BMO's faces, sounds and wake-word model still sit in their original folders; `[a
 
 ## Still to do in the character split
 
-- Move BMO's `faces/`, `sounds/` and `wakeword.onnx` into `characters/bmo/` (needs the same move on the Pi).
-- Move `generate_faces.py` and the sound generators into the pack.
+- Move BMO's `sounds/` and `wakeword.onnx` into `characters/bmo/` (needs the same move on the Pi).
+- Move the sound generators into the pack.
+- The poses and props in `face/index.html` are BMO's face; a second character would need them moved into its pack.
 - Split the system prompt into personality (pack) and action protocol (engine).
 - Rename engine identifiers that carry the name (`bmo_print`, `apply_bmo_border`, `BMO_LANGUAGE`).

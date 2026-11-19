@@ -73,7 +73,8 @@ def main():
                 wait(0.3)
 
             started = time.time()
-            for expression in ("happy", "sad", "angry", "surprised", "heart", "sleepy"):
+            for expression in ("happy", "sad", "angry", "surprised", "heart", "starry_eyed", "sleepy",
+                               "dizzy", "cheeky", "confused"):
                 state("idle", expression=expression, status=f"Feeling {expression}...")
                 wait(3.5, lambda: display.publish("timers", timers=[
                     {"ends_in_s": max(round(20 - (time.time() - started)), 0), "total_s": 20.0}

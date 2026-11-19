@@ -3,8 +3,8 @@
 The face is a web page drawn with three.js. This module is the bridge
 between the engine and that page:
 
-- static files: the page, its vendored libraries, the PNG frames of faces
-  that are not drawn live yet, and the picture currently on show;
+- static files: the page, its vendored libraries, and the picture currently
+  on show;
 - ``GET /events``: a Server-Sent Events stream of what the engine is doing
   (state, bubble text, mic level, speech loudness, timers, pictures);
 - ``POST /action``: touches from the page (tap, long press).
@@ -24,18 +24,11 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .character import PROJECT_ROOT
-from .config import CHARACTER, FACES_DIR
+from .config import CHARACTER
 from .log import bmo_print
 
 FACE_APP_DIR = os.path.join(PROJECT_ROOT, "face")
 DEFAULT_PORT = int(os.environ.get("FACE_PORT", "8765"))
-
-# Frame intervals of the PNG fallback, as in core/animation.py
-FRAME_MS = {
-    "warmup": 1000, "speaking": 90, "thinking": 500, "listening": 250,
-    "capturing": 150, "screensaver": 400, "shhh": 400,
-}
-DEFAULT_FRAME_MS = 500
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -60,19 +53,6 @@ def speech_envelope(pcm_bytes: bytes, sample_rate: int = 22050, step_ms: int = 2
     if peak < 1.0:
         return [0.0] * count
     return [round(float(v), 3) for v in np.clip(rms / peak, 0.0, 1.0)]
-
-
-def list_face_frames() -> dict:
-    """Frame files per face folder: ``{"happy": ["happy_01.png", ...]}``."""
-    faces = {}
-    if os.path.isdir(FACES_DIR):
-        for name in sorted(os.listdir(FACES_DIR)):
-            folder = os.path.join(FACES_DIR, name)
-            if os.path.isdir(folder):
-                frames = sorted(f for f in os.listdir(folder) if f.lower().endswith(".png"))
-                if frames:
-                    faces[name] = frames
-    return faces
 
 
 class DisplayServer:
@@ -207,10 +187,7 @@ class DisplayServer:
         return {
             "name": CHARACTER.name,
             "theme": {k: v for k, v in CHARACTER.theme.items() if isinstance(v, str)},
-            "faces": list_face_frames(),
             "screensaver": CHARACTER.screensaver_faces,
-            "frame_ms": FRAME_MS,
-            "default_frame_ms": DEFAULT_FRAME_MS,
         }
 
     def _send(self, handler, status, body: bytes, content_type: str):
@@ -241,8 +218,6 @@ class DisplayServer:
                 self._send(handler, 404, b"no image", "text/plain")
             else:
                 self._send(handler, 200, self._image_png, "image/png")
-        elif path.startswith("/faces/"):
-            self._send_file(handler, FACES_DIR, path[len("/faces/"):])
         else:
             self._send_file(handler, FACE_APP_DIR, "index.html" if path == "/" else path.lstrip("/"))
 

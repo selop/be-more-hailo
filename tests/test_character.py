@@ -64,18 +64,24 @@ def test_every_pack_loads():
             assert c.prompt(key)
 
 
-def test_pack_faces_exist():
-    """Every phase, expression and persona needs a folder of frames."""
+def live_poses():
+    """Names of the faces the live page can draw (the keys of POSES in face/index.html)."""
+    page = open(os.path.join(ROOT, "face", "index.html"), encoding="utf-8").read()
+    table = page[page.index("const POSES = {"):page.index("const POSE_KEYS")]
+    return set(re.findall(r"^  (\w+):\s*\{", table, flags=re.M))
+
+
+def test_every_face_the_engine_can_ask_for_is_drawn_by_the_page():
     from core.state import Phase
+    poses = live_poses()
+    assert len(poses) >= 20, poses
     for pack_id in _pack_ids():
         c = load_character(pack_id)
-        faces = c.asset("faces")
-        # display_image shows a picture and screensaver cycles other faces,
-        # so neither has frames of its own
+        # display_image shows a picture and screensaver wanders through other faces
         phases = {p.value for p in Phase} - {"display_image", "screensaver"}
-        needed = phases | c.expressions | c.personas
-        missing = sorted(n for n in needed if not os.path.isdir(os.path.join(faces, n)))
-        assert not missing, f"{pack_id}: no faces folder for {missing}"
+        needed = phases | c.expressions | c.personas | set(c.screensaver_faces) | set(c.idle_expressions)
+        missing = sorted(needed - poses)
+        assert not missing, f"{pack_id}: the live face has no pose for {missing}"
         unknown = sorted(set(c.idle_expressions) - c.expressions)
         assert not unknown, f"{pack_id}: idle_expressions not in expressions: {unknown}"
 

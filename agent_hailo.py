@@ -125,7 +125,9 @@ class BotGUI(TurnUI):
         ControlServer(self.conversation).start()
 
         # --- UI widgets ---
-        self.background_label = tk.Label(master, bg='black')
+        # Fallback window: plain face colour with the status line. The face
+        # itself is drawn by the live page on top (core/display_server.py).
+        self.background_label = tk.Label(master, bg=CHARACTER.theme["face_bg"])
         self.background_label.place(x=0, y=0, width=self.BG_WIDTH, height=self.BG_HEIGHT)
 
         self.meter = MicMeter(master)
@@ -408,6 +410,8 @@ class BotGUI(TurnUI):
 
     def set_boot_frame(self, frame):
         self.anim.current_frame = frame
+        if self.display is not None:
+            self.display.publish("boot", stage=frame)
 
     def take_photo(self, user_text):
         self.camera.handle_photo(user_text, lambda: self.store.phase.value)

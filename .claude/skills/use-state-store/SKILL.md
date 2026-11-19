@@ -64,12 +64,12 @@ if self.get_phase() == "speaking":
 1. Add the value to `Phase` enum in `core/state.py`
 2. If it needs a distinct animation speed, add to `AnimationEngine._speed_for_state()` in `core/animation.py`
 3. If wake word should be suppressed during this phase, add to the `suppressed` set in `BotGUI.wait_for_wakeword()`
-4. Create face frames in `faces/<phase_name>/` if needed
+4. Add a pose with the phase's name to `POSES` in `face/index.html` (see "Adding New Face States" in `CLAUDE.md`)
 
 ## Adding a new Expression
 
 1. Add to `VALID_EXPRESSIONS` (emotions) or `PERSONA_EXPRESSIONS` (persona gags) in `core/state.py` — this auto-includes it in `BotStates.ALL` for animation loading
-2. Create face frames in `faces/<expression_name>/`
+2. Add a pose with the same name to `POSES` in `face/index.html`
 3. If the LLM should be able to trigger it, the expression name must match what the LLM emits in `{"action": "set_expression", "value": "<name>"}`
 4. For screensaver use: add to `expression_states` or `persona_states` lists in `BotGUI.screensaver_audio_loop()`
 

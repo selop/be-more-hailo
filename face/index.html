@@ -8,14 +8,15 @@
   The assistant's face, drawn live with three.js behind a CRT tube effect.
 
   One full-screen quad; a fragment shader draws eyes and mouth from a few
-  numbers, so any pose blends into any other. Faces that are not drawn live
-  yet are shown from their PNG frames inside the same tube. The speech
-  bubble, status line, mic meter, timer clock and pictures are painted on a
-  2D canvas that the shader lays over the face before the tube effect.
+  numbers, so any pose blends into any other. Props such as the microphones
+  or the camera, and the speech bubble, status line, mic meter, timer clock
+  and pictures, are painted on a 2D canvas that the shader lays over the
+  face before the tube effect.
 
   Served by core/display_server.py it follows the engine through /events.
   Opened as a file it runs as a demo with buttons and keys:
-    1-6 poses, A answering, M microphone, C CRT on/off, H hide controls.
+    left/right arrows step through the faces, A answering, I idle,
+    M microphone, C CRT on/off, H hide controls.
   Still frames: ?freeze=1&pose=happy&open=45&width=62&blink=0&fx=0&t=3
 -->
 <style>
@@ -31,6 +32,7 @@
   canvas { display: block; width: 100%; height: 100%; }
   #bar { height: 64px; display: flex; gap: 8px; align-items: center; padding: 0 12px; flex-wrap: wrap; justify-content: center; }
   body.kiosk #bar { display: none; }
+  select { font: inherit; color: var(--ink); background: var(--frame); border: 2px solid var(--dim); border-radius: 6px; padding: 5px 8px; }
   button { font: inherit; color: var(--ink); background: transparent; border: 2px solid var(--dim);
            border-radius: 6px; padding: 5px 10px; cursor: pointer; }
   button:hover { border-color: var(--accent); }
@@ -43,7 +45,9 @@
 <body>
 <div id="stage"><canvas id="face" aria-label="The assistant's face"></canvas></div>
 <div id="bar">
-  <span id="poses"></span>
+  <button id="btn-prev" title="Previous face">&larr;</button>
+  <select id="pose" aria-label="Face"></select>
+  <button id="btn-next" title="Next face">&rarr;</button>
   <button id="btn-mic" aria-pressed="false" title="Drive the mouth with your voice">Mic <u>M</u></button>
   <button id="btn-fx" aria-pressed="true" title="Curved glass, scanlines, phosphor glow, colour fringes, flicker">CRT <u>C</u></button>
   <button id="btn-live" aria-pressed="false" title="Follow the engine again" hidden>Live</button>
@@ -68,6 +72,12 @@ uniform vec2  uGaze;       // eye offset
 uniform float uBob;        // vertical offset of the whole face
 uniform float uBlink;      // 0 open … 1 closed
 uniform vec4  uEyeK;       // eye shape weights: U-arc, dot, happy arc, slanted line
+uniform vec3  uEyeK2;      // more eye shapes: cross, heart, star
+uniform float uEyeShow;    // 0 hides the eyes (a prop takes their place)
+uniform float uWink;       // 1 = the right eye is a flat line
+uniform float uDotR2;      // radius of the right dot eye
+uniform float uHeartScale;
+uniform float uStarRot;
 uniform float uSlant;      // slanted-line eyes: +1 angry, −1 sad
 uniform float uDotR;       // radius of the dot eye
 uniform float uEyeScale;
@@ -78,8 +88,8 @@ uniform float uMouthOpen;  // pill height, 0 (closed line) … 65
 uniform float uMouthW;     // pill width
 uniform float uMouthPlain; // 1 = no teeth or tongue (the surprised "o")
 uniform float uMouthY;     // mouth up/down (happy bounce)
-uniform sampler2D uTex;    // PNG frame of a face that is not drawn live yet
-uniform float uTexMix;     // 0 live face … 1 PNG frame
+uniform float uMouthX;     // mouth left/right (boot animation)
+uniform float uMouthShow;  // 0 hides the mouth (a prop draws it)
 uniform sampler2D uOverlay; // bubble, status, meter, clock, pictures
 uniform float uFx;         // 0 flat … 1 CRT tube
 
@@ -113,22 +123,41 @@ float sdRoundBox(vec2 p, vec2 halfSize, float r) {
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 }
 
+float dot2(vec2 v) { return dot(v, v); }
+// Heart with its tip at the origin and its top near y = 1 (after Inigo Quilez)
+float sdHeart(vec2 p) {
+  p.x = abs(p.x);
+  if (p.y + p.x > 1.0) return sqrt(dot2(p - vec2(0.25, 0.75))) - sqrt(2.0) / 4.0;
+  return sqrt(min(dot2(p - vec2(0.0, 1.0)), dot2(p - 0.5 * max(p.x + p.y, 0.0)))) * sign(p.x - p.y);
+}
+
 // side: −1 left eye, +1 right eye
 float eye(vec2 p, vec2 centre, float side) {
   vec2 q = (p - centre - uGaze - vec2(side * uEyeJit, uEyeY)) / uEyeScale;
   float half_ = STROKE * 0.5;
-  // Only the round eyes blink: closing squashes them towards a flat lid
-  float blink = uBlink * (uEyeK.x + uEyeK.y);
+  float right = step(0.0, side);
+  // Only the round eyes blink: closing squashes them towards a flat lid.
+  // A wink does the same to the right eye alone.
+  float blink = max(uBlink * (uEyeK.x + uEyeK.y), uWink * right);
   float squash = 1.0 - 0.82 * blink;
   vec2 s = vec2(q.x, 5.0 + (q.y - 5.0) / squash);
   float arc   = (sdArc(s, ARC_U, 14.0) - half_) * squash;
-  float dot_  = (length(s - vec2(0.0, 5.0)) - uDotR) * squash;
+  float dot_  = (length(s - vec2(0.0, 5.0)) - mix(uDotR, uDotR2, right)) * squash;
   float happy = sdArc(vec2(q.x, 13.0 - q.y), ARC_90, 14.0) - half_;
   float tilt  = side * uSlant * 10.0;
   float slant = sdSegment(q, vec2(-18.0, 5.0 + tilt), vec2(18.0, 5.0 - tilt)) - half_;
-  float shape = uEyeK.x * arc + uEyeK.y * dot_ + uEyeK.z * happy + uEyeK.w * slant;
+  vec2 v = q - vec2(0.0, 5.0);
+  float crossed = min(sdSegment(v, vec2(-15.0, -15.0), vec2(15.0, 15.0)), sdSegment(v, vec2(-15.0, 15.0), vec2(15.0, -15.0))) - half_;
+  float hs = 33.0 * uHeartScale;
+  float heart = sdHeart(vec2(v.x, -v.y) / hs + vec2(0.0, 0.55)) * hs;
+  float cs = cos(uStarRot), sn = sin(uStarRot);
+  vec2 sv = abs(vec2(cs * v.x - sn * v.y, sn * v.x + cs * v.y));
+  float star = (pow(sqrt(sv.x) + sqrt(sv.y), 2.0) - 22.0) * 0.5;      // four-point sparkle
+  float shape = uEyeK.x * arc + uEyeK.y * dot_ + uEyeK.z * happy + uEyeK.w * slant
+              + uEyeK2.x * crossed + uEyeK2.y * heart + uEyeK2.z * star;
   float lid   = sdSegment(q, vec2(-18.0, 5.0), vec2(18.0, 5.0)) - half_;
-  return mix(shape, lid, smoothstep(0.55, 1.0, blink)) * uEyeScale;
+  // Hiding shrinks the eye away
+  return mix(shape, lid, smoothstep(0.55, 1.0, blink)) * uEyeScale + (1.0 - uEyeShow) * 60.0;
 }
 
 // The face drawn live, at face-pixel position p
@@ -136,7 +165,7 @@ vec3 liveFace(vec2 p) {
   vec3 col = uBg;
   float dEyes = min(eye(p, EYE_L, -1.0), eye(p, EYE_R, 1.0));
 
-  vec2 q = p - MOUTH - vec2(0.0, uMouthY);
+  vec2 q = p - MOUTH - vec2(uMouthX, uMouthY);
   // Line that opens into a pill with teeth and tongue
   float halfW = uMouthW * 0.5;
   float h = max(uMouthOpen, STROKE);
@@ -145,7 +174,7 @@ vec3 liveFace(vec2 p) {
   float pill = sdRoundBox(q, halfSize, halfSize.y);
   float smile = sdArc(q + vec2(0.0, 20.0), ARC_45, 44.5) - STROKE * 0.5;
   float frown = sdArc(vec2(q.x, 20.0 - q.y), ARC_45, 44.5) - STROKE * 0.5;
-  float dMouth = uMouthK.x * pill + uMouthK.y * smile + uMouthK.z * frown;
+  float dMouth = uMouthK.x * pill + uMouthK.y * smile + uMouthK.z * frown + (1.0 - uMouthShow) * 60.0;
 
   vec3 inside = CAVITY;
   float detail = 1.0 - uMouthPlain;
@@ -162,7 +191,7 @@ vec3 liveFace(vec2 p) {
 
   col = mix(col, LINE, cover(dEyes));
   col = mix(col, LINE, cover(dMouth));
-  col = mix(col, inside, cover(pill + STROKE) * uMouthK.x);
+  col = mix(col, inside, cover(pill + STROKE) * uMouthK.x * uMouthShow);
   return col;
 }
 
@@ -170,7 +199,6 @@ vec3 liveFace(vec2 p) {
 vec3 picture(vec2 p) {
   vec2 st = vec2(p.x / 800.0, 1.0 - p.y / 480.0);
   vec3 col = liveFace(vec2(p.x, p.y - uBob));
-  if (uTexMix > 0.001) col = mix(col, texture2D(uTex, st).rgb, uTexMix);
   vec4 over = texture2D(uOverlay, st);
   return mix(col, over.rgb, over.a);
 }
@@ -256,7 +284,7 @@ const theme = {
   face_bg: '#bdffcb', status_fg: '#1a5c2a', alert_fg: '#f44336',
   bubble_fill: '#ffffff', bubble_outline: '#2a6b3a', bubble_text: '#1a4a28',
 };
-let config = { faces: {}, screensaver: [], frame_ms: {}, default_frame_ms: 500 };
+let config = { screensaver: [] };
 
 const canvas = $('face');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
@@ -271,9 +299,6 @@ const overlayTexture = new THREE.CanvasTexture(overlayCanvas);
 overlayTexture.minFilter = overlayTexture.magFilter = THREE.LinearFilter;
 overlayTexture.generateMipmaps = false;
 
-const blankTexture = new THREE.DataTexture(new Uint8Array([189, 255, 203, 255]), 1, 1);
-blankTexture.needsUpdate = true;
-
 // The face colours are written as plain sRGB numbers, so skip three's colour conversion
 THREE.ColorManagement.enabled = false;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
@@ -281,11 +306,13 @@ renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 const uniforms = {
   uPx: { value: 1 }, uTime: { value: 0 }, uBg: { value: new THREE.Color(theme.face_bg) },
   uGaze: { value: new THREE.Vector2() }, uBob: { value: 0 }, uBlink: { value: 0 },
-  uEyeK: { value: new THREE.Vector4(1, 0, 0, 0) }, uSlant: { value: 0 }, uDotR: { value: 17 },
+  uEyeK: { value: new THREE.Vector4(1, 0, 0, 0) }, uEyeK2: { value: new THREE.Vector3(0, 0, 0) },
+  uSlant: { value: 0 }, uDotR: { value: 17 }, uDotR2: { value: 17 }, uEyeShow: { value: 1 }, uWink: { value: 0 },
+  uHeartScale: { value: 1 }, uStarRot: { value: 0 },
   uEyeScale: { value: 1 }, uEyeY: { value: 0 }, uEyeJit: { value: 0 },
   uMouthK: { value: new THREE.Vector3(1, 0, 0) }, uMouthOpen: { value: 0 }, uMouthW: { value: 97 },
-  uMouthPlain: { value: 0 }, uMouthY: { value: 0 },
-  uTex: { value: blankTexture }, uTexMix: { value: 0 }, uOverlay: { value: overlayTexture },
+  uMouthPlain: { value: 0 }, uMouthY: { value: 0 }, uMouthX: { value: 0 }, uMouthShow: { value: 1 },
+  uOverlay: { value: overlayTexture },
   uFx: { value: 0 },
 };
 scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader })));
@@ -299,15 +326,46 @@ function resize() {
 }
 new ResizeObserver(resize).observe(canvas);
 
-// ── Poses drawn live ─────────────────────────────────────────────────────
-// eye: weights for [U-arc, dot, happy arc, slanted line]; mouth: [line/pill, smile, frown]
+// ── Poses ────────────────────────────────────────────────────────────────
+// Every face is a pose: weights for the eye and mouth shapes the shader can
+// draw, a few numbers, motion flags, and optionally a prop painted on the
+// canvas (see PROPS).
+//   eye:  [U-arc, dot, happy arc, slanted line]     eye2: [cross, heart, star]
+//   mouth: [line/pill, smile, frown]
+const E = { arc: [1, 0, 0, 0], dot: [0, 1, 0, 0], happy: [0, 0, 1, 0], line: [0, 0, 0, 1], none: [0, 0, 0, 0] };
+const M = { line: [1, 0, 0], smile: [0, 1, 0], frown: [0, 0, 1] };
 const POSES = {
-  idle:      { eye: [1, 0, 0, 0], mouth: [1, 0, 0] },
-  speaking:  { eye: [0, 1, 0, 0], mouth: [1, 0, 0], talk: true },
-  happy:     { eye: [0, 0, 1, 0], mouth: [0, 1, 0], bounce: true },
-  sad:       { eye: [0, 0, 0, 1], mouth: [0, 0, 1], slant: -1, droop: true },
-  angry:     { eye: [0, 0, 0, 1], mouth: [1, 0, 0], slant: 1, tremble: true },
-  surprised: { eye: [0, 1, 0, 0], mouth: [1, 0, 0], dotR: 16, open: 40, width: 40, plain: 1, pulse: true },
+  // What the engine is doing
+  idle:        { eye: E.arc, mouth: M.line, gaze: 'wander' },
+  listening:   { eye: E.arc, mouth: M.line, eyeShow: 0, mouthShow: 0, prop: 'listening' },
+  thinking:    { eye: E.arc, mouth: M.line, prop: 'thinking' },
+  speaking:    { eye: E.dot, mouth: M.line, talk: true },
+  capturing:   { eye: E.arc, mouth: M.line, eyeShow: 0, mouthShow: 0, prop: 'capturing' },
+  warmup:      { eye: E.arc, mouth: M.line, prop: 'warmup' },
+  jamming:     { eye: E.line, mouth: M.smile, bounce: true, prop: 'jamming' },
+  shhh:        { eye: E.arc, mouth: M.line, mouthShow: 0, blinkPulse: 0.4, prop: 'shhh' },
+  error:       { eye: E.none, eye2: [1, 0, 0], mouth: M.frown },
+  // Emotions
+  happy:       { eye: E.happy, mouth: M.smile, bounce: true },
+  sad:         { eye: E.line, mouth: M.frown, slant: -1, droop: true },
+  angry:       { eye: E.line, mouth: M.line, slant: 1, tremble: true },
+  surprised:   { eye: E.dot, mouth: M.line, dotR: 16, open: 40, width: 40, plain: 1, pulse: true },
+  sleepy:      { eye: E.line, mouth: M.line, prop: 'sleepy' },
+  dizzy:       { eye: E.none, eye2: [1, 0, 0], mouth: M.line, mouthShow: 0, prop: 'wavyMouth' },
+  cheeky:      { eye: E.dot, mouth: M.line, dotR: 16, wink: 1, mouthShow: 0, prop: 'cheeky' },
+  heart:       { eye: E.none, eye2: [0, 1, 0], mouth: M.smile, heartBeat: true },
+  starry_eyed: { eye: E.none, eye2: [0, 0, 1], mouth: M.line, open: 40, width: 40, plain: 1, starSpin: true },
+  confused:    { eye: E.dot, mouth: M.line, dotR: 23, wink: 1, mouthShow: 0, prop: 'wavyMouth' },
+  // Screensaver moods
+  daydream:    { eye: E.arc, mouth: M.line, blink: 0.18, eyeY: -3, drift: true, prop: 'daydream' },
+  bored:       { eye: E.arc, mouth: M.frown, mouthY: -5, gaze: 'scan', scan: 8 },
+  curious:     { eye: E.dot, mouth: M.line, dotR: 20, dotR2: 14, dotPulse: 3 },
+  // Personas
+  football:    { eye: E.happy, mouth: M.smile, prop: 'football' },
+  detective:   { eye: E.arc, mouth: M.line, blink: 0.3, eyeY: 5, gaze: 'scan', scan: 10, prop: 'detective' },
+  sir_mano:    { eye: E.dot, mouth: M.smile, dotR: 16, mouthY: 15, prop: 'sirMano' },
+  low_battery: { eye: E.line, mouth: M.frown, slant: -1, eyeY: 2, prop: 'lowBattery' },
+  bee:         { eye: E.dot, mouth: M.line, dotR: 18, open: 40, width: 40, plain: 1, gaze: 'bee', prop: 'bee' },
 };
 const POSE_KEYS = Object.keys(POSES);
 
@@ -326,66 +384,46 @@ const eased = (value, speed) => new Eased(value, speed);
 
 const face = {
   eye: [eased(1, 22), eased(0, 22), eased(0, 22), eased(0, 22)],
+  eye2: [eased(0, 22), eased(0, 22), eased(0, 22)],
   mouth: [eased(1, 22), eased(0, 22), eased(0, 22)],
-  slant: eased(0, 20), dotR: eased(17, 25), plain: eased(0, 25),
+  slant: eased(0, 20), dotR: eased(17, 25), dotR2: eased(17, 25), plain: eased(0, 25),
+  wink: eased(0, 24), eyeShow: eased(1, 22), mouthShow: eased(1, 22), blinkMin: eased(0, 20),
+  eyeY: eased(0, 18), mouthY: eased(0, 18), mouthX: eased(0, 12),
   mouthOpen: eased(0, 38), mouthW: eased(97, 30),
   gazeX: eased(0, 9), gazeY: eased(0, 9), eyeScale: eased(1, 30),
-  texMix: eased(0, 16), fx: eased(1, 5),
+  fx: eased(1, 5),
 };
 const allEased = () => Object.values(face).flat();
 
-// What to show. `engine` comes from the event stream; `override` from the demo buttons.
+// What to show. `engine` comes from the event stream; `override` from the demo controls.
 const view = {
   engine: { phase: 'idle', expression: 'idle', muted: false, status: '' },
   override: null,
-  pose: 'idle',           // the live pose in use (also the one frames fade out to)
-  frames: null,           // name of a PNG-frame face being shown, or null
+  pose: 'idle',
+  poseSince: 0,           // clock time when this pose started (props animate from here)
 };
 function wanted() { return view.override || view.engine.expression || 'idle'; }
 
 function applyExpression() {
   let name = wanted();
   if (name === 'screensaver') name = screensaver.current();
-  if (POSES[name]) {
-    view.pose = name; view.frames = null; face.texMix.target = 0;
-  } else if (config.faces[name]) {
-    view.frames = name; face.texMix.target = 1;
-  } else {
-    view.pose = 'idle'; view.frames = null; face.texMix.target = 0;     // unknown face: idle
-  }
-  const pose = POSES[view.pose];
+  if (!POSES[name]) name = 'idle';          // display_image and anything unknown
+  if (name !== view.pose) { view.pose = name; view.poseSince = frozen ? 0 : clock; }
+  const pose = POSES[name];
   pose.eye.forEach((w, i) => { face.eye[i].target = w; });
+  (pose.eye2 || [0, 0, 0]).forEach((w, i) => { face.eye2[i].target = w; });
   pose.mouth.forEach((w, i) => { face.mouth[i].target = w; });
   face.slant.target = pose.slant || 0;
   face.dotR.target = pose.dotR || 17;
+  face.dotR2.target = pose.dotR2 || pose.dotR || 17;
   face.plain.target = pose.plain || 0;
-  updateButtons();
-}
-
-// ── PNG frames for faces not drawn live yet ──────────────────────────────
-const textureLoader = new THREE.TextureLoader();
-const textureCache = new Map();
-function frameTexture(name, index) {
-  const files = config.faces[name];
-  const url = `/faces/${name}/${files[index % files.length]}`;
-  if (!textureCache.has(url)) {
-    const texture = textureLoader.load(url, () => { texture.userData.ready = true; });
-    texture.minFilter = texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
-    texture.colorSpace = THREE.NoColorSpace;
-    textureCache.set(url, texture);
-  }
-  return textureCache.get(url);
-}
-const frames = { name: null, index: 0, since: 0 };
-function updateFrames(now) {
-  if (!view.frames) return;
-  const interval = config.frame_ms[view.engine.phase] || config.default_frame_ms;
-  if (frames.name !== view.frames) { frames.name = view.frames; frames.index = 0; frames.since = now; }
-  else if (now - frames.since >= interval) { frames.index++; frames.since = now; }
-  const texture = frameTexture(frames.name, frames.index);
-  if (texture.userData.ready) uniforms.uTex.value = texture;
-  frameTexture(frames.name, frames.index + 1);      // warm the next one
+  face.wink.target = pose.wink || 0;
+  face.eyeShow.target = pose.eyeShow === 0 ? 0 : 1;
+  face.mouthShow.target = pose.mouthShow === 0 ? 0 : 1;
+  face.blinkMin.target = pose.blink || 0;
+  face.mouthX.target = 0;
+  overlay.dirty = true;
+  updateControls();
 }
 
 // Screensaver: wander through the faces the character pack lists for it
@@ -394,16 +432,179 @@ const screensaver = {
   current() { return this.name; },
   update(now) {
     if (wanted() !== 'screensaver' || now < this.until) return;
-    const pool = (config.screensaver || []).filter((n) => POSES[n] || config.faces[n]);
+    const pool = (config.screensaver || []).filter((n) => POSES[n]);
     if (!pool.length) return;
     let next = pool[Math.floor(Math.random() * pool.length)];
     if (next === this.name && pool.length > 1) next = pool[(pool.indexOf(next) + 1) % pool.length];
     this.name = next;
-    const count = POSES[next] ? 0 : config.faces[next].length;
-    this.until = now + (count ? count * 2 * (config.frame_ms.screensaver || 400) : rand(4000, 7000));
+    this.until = now + (next === 'bee' ? 6400 : rand(4500, 7500));
     applyExpression();
   },
 };
+
+// Boot: the engine reports loading stages (1 = brain loading … 15 = ready)
+const boot = { stage: 0, since: 0 };
+function bootProgress(now) {
+  if (boot.stage >= 15) return 1;
+  if (boot.stage === 14) return 0.97;
+  if (boot.stage === 13) return 0.93;
+  return Math.min((now - boot.since) / 12000, 1) * 0.88;
+}
+
+// ── Props: things a pose needs that are not eyes or a mouth ──────────────
+// Painted on the overlay canvas each frame, in face pixels; t = seconds since the pose began.
+const INK = '#000';
+function stroke(width, colour = INK) { ctx.lineWidth = width; ctx.strokeStyle = colour; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; }
+function segment(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+function disc(x, y, r, colour = INK) { ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+function ellipse(x, y, rx, ry, colour) { ctx.fillStyle = colour; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+function ring(x, y, r, from, to) { ctx.beginPath(); ctx.arc(x, y, r, from * Math.PI / 180, to * Math.PI / 180); ctx.stroke(); }
+const wave = (t, speed) => 0.5 + 0.5 * Math.sin(t * speed);
+
+function drawMic(cx, cy) {
+  const top = cy - 18, bottom = cy + 18;
+  ctx.fillStyle = '#3c3c3c'; stroke(6);
+  roundRect(cx - 11, top, 22, 36, 11); ctx.fill(); ctx.stroke();
+  stroke(2, '#646464');
+  for (let y = top + 9; y < bottom - 6; y += 8) segment(cx - 5, y, cx + 5, y);
+  stroke(8);
+  segment(cx, bottom + 4, cx, bottom + 16);          // stand
+  segment(cx - 18, bottom + 16, cx + 18, bottom + 16);   // base
+  ring(cx, bottom - 4, 13, 0, 180);                  // cradle
+}
+function drawNote(x, y) {
+  ellipse(x + 5, y + 4, 6, 4.5, INK);
+  stroke(3); segment(x + 10, y + 2, x + 10, y - 20); segment(x + 10, y - 20, x + 17, y - 17);
+}
+function drawZ(x, y, size, width, alpha) {
+  ctx.globalAlpha = alpha; stroke(width);
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + size, y); ctx.lineTo(x, y + size); ctx.lineTo(x + size, y + size); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+const PROPS = {
+  // A microphone in place of each eye, with sound waves rippling in from the sides
+  listening(t) {
+    drawMic(217, 200); drawMic(581, 200);
+    stroke(8);
+    [36, 26, 17].forEach((r, i) => {
+      const phase = (t * 1.4 - i * 0.22) % 1;        // outer wave first, then inwards
+      ctx.globalAlpha = clamp01(Math.sin(Math.max(phase, 0) * Math.PI) * 1.4);
+      ring(217 - 75, 200, r - 4, -45, 45);
+      ring(581 + 75, 200, r - 4, 135, 225);
+    });
+    ctx.globalAlpha = 1;
+  },
+  // A dot pacing back and forth between eyes and mouth
+  thinking(t) { disc(410 + 20 * Math.sin(t * 2.2), 250, 10); },
+  // A camera filling the screen; the aperture snaps shut and the flash fires
+  capturing(t) {
+    const cycle = (t % 1.2) / 1.2, shut = Math.pow(Math.sin(cycle * Math.PI), 6), flash = shut > 0.85;
+    ctx.fillStyle = '#3c3c3c'; stroke(8); roundRect(120, 80, 560, 320, 30); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#1e1e1e'; stroke(4); ctx.fillRect(160, 100, 60, 40); ctx.strokeRect(160, 100, 60, 40);
+    disc(399, 70, 18, '#5a5a5a'); stroke(4); ring(399, 70, 18, 0, 360);
+    ctx.fillStyle = flash ? '#fff' : '#ffe664'; ctx.fillRect(580, 100, 60, 40);
+    stroke(flash ? 3 : 4, flash ? '#ffffc8' : INK); ctx.strokeRect(flash ? 570 : 580, flash ? 90 : 100, flash ? 80 : 60, flash ? 60 : 40);
+    disc(399, 250, 100, '#141414'); stroke(8, '#646464'); ring(399, 250, 96, 0, 360);
+    disc(399, 250, 80, '#0a0a28'); stroke(4, '#3c3c3c'); ring(399, 250, 78, 0, 360);
+    const aperture = 60 - 57 * shut;
+    disc(399, 250, aperture, '#282850'); stroke(3, '#505078'); ring(399, 250, aperture, 0, 360);
+    ctx.globalAlpha = 0.7; disc(369, 220, 15, '#fff'); ctx.globalAlpha = 1;
+  },
+  // Boot: a progress bar, and scrambled symbols for eyes while the brain loads
+  warmup(t, now) {
+    const pct = bootProgress(now);
+    ctx.fillStyle = '#dcffe6'; stroke(6); roundRect(269, 120, 260, 20, 10); ctx.fill(); ctx.stroke();
+    if (pct > 0.02) { ctx.fillStyle = '#298339'; roundRect(269, 120, Math.max(260 * pct, 20), 20, 10); ctx.fill(); ctx.stroke(); }
+    ctx.fillStyle = INK; ctx.font = `bold 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(`${Math.round(pct * 100)}%`, 399, 100);
+    if (boot.stage < 13) {
+      const symbols = '$%@*+#?!&~^>', i = Math.floor((now - boot.since) / 1000);
+      ctx.font = `bold 46px ${FONT}`;
+      ctx.fillText(symbols[i % 12], 217, 202); ctx.fillText(symbols[(i + 3) % 12], 581, 202);
+    }
+  },
+  // Notes bobbing next to the head
+  jamming(t) {
+    drawNote(625 + 8 * Math.sin(t * 2), 150 + 5 * Math.sin(t * 4));
+    drawNote(648 - 6 * Math.sin(t * 2.6), 126 - 5 * Math.sin(t * 4));
+  },
+  // A small X for a mouth
+  shhh(t) { const s = 10 + 6 * wave(t, 1.6); stroke(8); segment(399 - s, 302 - s, 399 + s, 302 + s); segment(399 - s, 302 + s, 399 + s, 302 - s); },
+  // Zs drifting up and fading
+  sleepy(t) {
+    const a = (t % 4) / 4, b = ((t + 2) % 4) / 4;
+    drawZ(600, 122 - a * 34, 25, 4, Math.sin(a * Math.PI));
+    drawZ(650, 82 - b * 30, 15, 3, Math.sin(b * Math.PI));
+  },
+  // A squiggle that keeps flipping, for dizzy and confused
+  wavyMouth(t) {
+    const swing = Math.cos(t * 5);
+    stroke(8); ctx.beginPath();
+    for (let x = 364; x <= 436; x += 3) {
+      const y = 300 + 14 * swing * Math.sin((x - 364) / 72 * Math.PI * 2);
+      if (x === 364) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  },
+  // A tongue wagging under a straight mouth
+  cheeky(t) {
+    const x = 409 + 10 * Math.sin(t * 3);
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 302, 800, 60); ctx.clip();
+    disc(x, 317, 15); disc(x, 317, 8, '#70c370');
+    ctx.restore();
+    stroke(8); segment(350.5, 302, 447.5, 302);
+  },
+  // Thought bubbles rising beside the head
+  daydream(t) {
+    const p = (t % 5) / 5, y = 180 - p * 80;
+    ctx.globalAlpha = clamp01(Math.sin(p * Math.PI) * 1.6);
+    if (p > 0.15) disc(625, y + 25, 5);
+    if (p > 0.35) disc(642.5, y + 7.5, 7.5);
+    if (p > 0.55) disc(653.5, y - 15, 11);
+    ctx.globalAlpha = 1;
+  },
+  // Pink cheeks and a bow
+  football() {
+    const pink = '#ff69b4';
+    ellipse(170, 245, 20, 15, pink); ellipse(630, 245, 20, 15, pink);
+    ctx.fillStyle = pink;
+    for (const dx of [-29, 29]) { ctx.beginPath(); ctx.moveTo(399, 70); ctx.lineTo(399 + dx, 50); ctx.lineTo(399 + dx, 90); ctx.closePath(); ctx.fill(); }
+    ellipse(399, 70, 14, 10, pink);
+  },
+  // A fedora and a pipe
+  detective(t) {
+    ctx.fillStyle = '#323232'; ctx.fillRect(250, 100, 300, 20); ctx.fillRect(300, 20, 200, 80);
+    ctx.fillStyle = '#141414'; ctx.fillRect(300, 85, 200, 15);
+    stroke(8, '#8b4513'); ctx.lineCap = 'butt'; segment(399, 302, 450, 350);
+    ctx.fillStyle = '#8b4513'; ctx.fillRect(440, 330, 20, 20);
+    const puff = (t % 3) / 3;                       // a wisp of smoke from the pipe
+    ctx.globalAlpha = 0.35 * Math.sin(puff * Math.PI); disc(452 + 6 * Math.sin(t * 2), 322 - puff * 46, 5 + puff * 7, '#555'); ctx.globalAlpha = 1;
+  },
+  // A handlebar moustache
+  sirMano() {
+    stroke(8); ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.ellipse(364.5, 275, 30.5, 11, 0, 0, Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(433.5, 275, 30.5, 11, 0, 0, Math.PI); ctx.stroke();
+    ring(325, 265, 11, 90, 270); ring(473, 265, 11, -90, 90);
+  },
+  // An almost empty battery, its last bar flashing
+  lowBattery(t) {
+    stroke(6); ctx.lineJoin = 'miter'; ctx.strokeRect(323, 53, 124, 44);
+    ctx.fillStyle = INK; ctx.fillRect(450, 65, 15, 20);
+    ctx.fillStyle = `rgb(${Math.round(100 + 155 * wave(t, 6))},0,0)`; ctx.fillRect(328, 58, 23, 34);
+  },
+  // A bee flying across; the eyes follow it (see beeX)
+  bee(t) {
+    const x = beeX(t), y = 150 + 30 * Math.sin(t * 2.6);
+    ellipse(x + 25, y - 5 + 4 * Math.sin(t * 40), 10, 10, '#c8c8ff');      // wing
+    ellipse(x + 20, y + 12.5, 20, 12.5, '#ffeb3b');
+    ctx.save(); ctx.beginPath(); ctx.ellipse(x + 20, y + 12.5, 20, 12.5, 0, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = INK; ctx.fillRect(x + 10, y, 6, 25); ctx.fillRect(x + 24, y, 6, 25);
+    ctx.restore();
+  },
+};
+function beeX(t) { return 100 + ((t % 6.4) / 6.4) * 640; }
 
 // ── Motion ───────────────────────────────────────────────────────────────
 const blink = { start: -1, next: rand(1.5, 3.5), double: false };
@@ -421,9 +622,12 @@ function blinkAmount(t) {
 
 const gaze = { next: rand(2, 5) };
 function updateGaze(t) {
+  const pose = POSES[view.pose], since = t - view.poseSince;
+  if (pose.gaze === 'scan') { face.gazeX.target = pose.scan * Math.sin(since * 1.1); face.gazeY.target = 0; return; }
+  if (pose.gaze === 'bee') { face.gazeX.target = (beeX(since) - 400) / 15; face.gazeY.target = 4 * Math.sin(since * 2.6); return; }
+  if (pose.gaze !== 'wander') { face.gazeX.target = 0; face.gazeY.target = 0; return; }
   if (t < gaze.next) return;
-  const still = view.pose !== 'idle';       // only the idle face looks around
-  if (still || Math.abs(face.gazeX.target) > 0.5 || Math.random() < 0.45) { face.gazeX.target = 0; face.gazeY.target = 0; }
+  if (Math.abs(face.gazeX.target) > 0.5 || Math.random() < 0.45) { face.gazeX.target = 0; face.gazeY.target = 0; }
   else { face.gazeX.target = rand(-9, 9); face.gazeY.target = rand(-3, 3); }
   gaze.next = t + rand(1.2, 4.5);
 }
@@ -449,7 +653,7 @@ function syntheticLoudness(t) {
 }
 const mic = { on: false, analyser: null, data: null, peak: 0.08 };
 async function toggleMic() {
-  if (mic.on) { mic.on = false; updateButtons(); return; }
+  if (mic.on) { mic.on = false; updateControls(); return; }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const audio = new AudioContext();
@@ -458,7 +662,7 @@ async function toggleMic() {
     audio.createMediaStreamSource(stream).connect(mic.analyser);
     mic.on = true; setOverride('speaking'); note('Talk: the mouth follows your voice.');
   } catch (err) { note('Microphone unavailable: ' + err.message); }
-  updateButtons();
+  updateControls();
 }
 function micLoudness(dt) {
   mic.analyser.getFloatTimeDomainData(mic.data);
@@ -521,6 +725,8 @@ function drawOverlay(now) {
   ctx.clearRect(0, 0, 800, 480);
 
   if (overlay.image) ctx.drawImage(overlay.image, 0, 0, 800, 480);   // a photo or picture fills the screen
+  const prop = PROPS[POSES[view.pose].prop];
+  if (prop && !overlay.image) { ctx.save(); prop(clock - view.poseSince, now); ctx.restore(); }
   const quiet = phase === 'screensaver';                            // the screensaver shows the face only
 
   // Mic meter while listening: 22 segments, green to red, with a peak line
@@ -603,7 +809,7 @@ function updateOverlay(now) {
   const before = overlay.timers.length;
   overlay.timers = overlay.timers.filter((t) => t.endsAt > now - 300);
   if (overlay.timers.length !== before) overlay.dirty = true;
-  const animating = view.engine.phase === 'listening' || overlay.timers.length > 0 || (b.text && now - b.shownAt < 300);
+  const animating = POSES[view.pose].prop || view.engine.phase === 'listening' || overlay.timers.length > 0 || (b.text && now - b.shownAt < 300);
   if (!overlay.dirty && !(animating && now - overlay.lastDraw > 33)) return;
   overlay.dirty = false; overlay.lastDraw = now;
   drawOverlay(now);
@@ -624,6 +830,7 @@ function connect() {
     overlay.dirty = true;
   });
   on('meter', ({ level }) => { overlay.meter.raw = level; });
+  on('boot', ({ stage }) => { if (stage === 1 || !boot.since) boot.since = performance.now(); boot.stage = stage; });
   on('speak', ({ envelope, step_ms }) => { speech.envelope = envelope; speech.stepMs = step_ms; speech.startedAt = performance.now(); });
   on('timers', ({ timers }) => {
     const now = performance.now();
@@ -654,7 +861,7 @@ canvas.addEventListener('pointerup', () => {
   if (!pressedAt) return;
   const held = performance.now() - pressedAt; pressedAt = 0;
   if (!served || view.override) {           // demo: a tap steps through the poses
-    if (held < 600) setOverride(POSE_KEYS[(POSE_KEYS.indexOf(view.pose) + 1) % POSE_KEYS.length]);
+    if (held < 600) stepPose(1);
     return;
   }
   sendAction(held >= 5000 ? 'shutdown' : held >= 1500 ? 'long_press' : 'tap');
@@ -670,14 +877,13 @@ function frame(now) {
   const t = clock;
 
   screensaver.update(now);
-  updateFrames(now);
   updateOverlay(now);
-  const pose = POSES[view.pose];
+  const pose = POSES[view.pose], since = t - view.poseSince, live = frozen ? 0 : 1;
 
   // Mouth: loud, open sounds are tall and narrow; quiet ones short and wide
   const loud = pose.talk ? loudness(t, dt, now) : 0;
   const tall = loud * (0.75 + 0.25 * speech.shape);
-  const pulse = pose.pulse && !frozen ? 4 * Math.sin(t * 1.6) : 0;
+  const pulse = pose.pulse ? live * 4 * Math.sin(t * 1.6) : 0;
   if (pose.talk) {
     face.mouthOpen.target = loud < 0.06 ? 0 : 14 + 46 * tall;
     face.mouthW.target = loud < 0.06 ? 97 : 90 - 34 * tall * (0.6 + 0.4 * speech.shape);
@@ -686,25 +892,41 @@ function frame(now) {
     face.mouthW.target = (pose.width || 97) + pulse;
   }
   face.eyeScale.target = 1 + 0.05 * loud;
+  face.eyeY.target = (pose.eyeY || 0) + live * ((pose.droop ? 3 + 3 * Math.sin(t * 2.1) : 0) + (pose.drift ? 3 * Math.sin(t * 1.2) : 0));
+  face.mouthY.target = (pose.mouthY || 0) + live * (pose.bounce ? 4 * Math.sin(t * 1.6) : 0);
+  if (pose.dotPulse) face.dotR.target = pose.dotR + live * pose.dotPulse * Math.sin(t * 1.6);
   updateGaze(t);
-  let blinkValue = blinkAmount(t);
+  let blinkValue = Math.max(blinkAmount(t), face.blinkMin.value, pose.blinkPulse ? pose.blinkPulse * wave(since, 1.6) : 0);
+
+  // Boot: symbols for eyes and a sliding mouth while the brain loads, then the eyes open
+  if (view.pose === 'warmup') {
+    face.eyeShow.target = boot.stage >= 13 ? 1 : 0;
+    face.mouthX.target = boot.stage >= 13 ? 0 : 25 * Math.sin((now - boot.since) / 1000 * 0.8);
+    blinkValue = boot.stage === 13 ? 1 : boot.stage === 14 ? 0.5 : boot.stage >= 15 ? 0 : blinkValue;
+  }
 
   if (frozen) {     // still frames from URL parameters
     allEased().forEach((item) => item.snap());
     if (params.has('open')) face.mouthOpen.value = Number(params.get('open'));
     if (params.has('width')) face.mouthW.value = Number(params.get('width'));
-    blinkValue = Number(params.get('blink') || 0);
-    face.gazeX.value = Number(params.get('gaze') || 0); face.gazeY.value = 0;
+    blinkValue = Math.max(Number(params.get('blink') || 0), face.blinkMin.value);
+    if (params.has('gaze')) face.gazeX.value = Number(params.get('gaze'));
   } else {
     allEased().forEach((item) => item.step(dt));
   }
 
-  const live = frozen ? 0 : 1;
   uniforms.uTime.value = t;
   uniforms.uEyeK.value.set(...face.eye.map((w) => clamp01(w.value)));
+  uniforms.uEyeK2.value.set(...face.eye2.map((w) => clamp01(w.value)));
   uniforms.uMouthK.value.set(...face.mouth.map((w) => clamp01(w.value)));
   uniforms.uSlant.value = face.slant.value;
   uniforms.uDotR.value = face.dotR.value;
+  uniforms.uDotR2.value = face.dotR2.value;
+  uniforms.uWink.value = clamp01(face.wink.value);
+  uniforms.uEyeShow.value = clamp01(face.eyeShow.value);
+  uniforms.uMouthShow.value = clamp01(face.mouthShow.value);
+  uniforms.uHeartScale.value = pose.heartBeat ? 1 + live * 0.5 * Math.pow(wave(t, 5), 3) : 1;      // a beat, not a sway
+  uniforms.uStarRot.value = pose.starSpin ? live * t * 1.2 : 0;
   uniforms.uMouthPlain.value = clamp01(face.plain.value);
   uniforms.uBlink.value = blinkValue;
   uniforms.uGaze.value.set(face.gazeX.value, face.gazeY.value);
@@ -712,10 +934,10 @@ function frame(now) {
   uniforms.uMouthOpen.value = Math.max(0, face.mouthOpen.value);
   uniforms.uMouthW.value = face.mouthW.value;
   uniforms.uBob.value = live * (1.6 * Math.sin(t * 1.5) + 1.2 * loud);                 // breathing
-  uniforms.uMouthY.value = live * (pose.bounce ? 4 * Math.sin(t * 1.6) : 0);           // happy bounce
-  uniforms.uEyeY.value = live * (pose.droop ? 3 + 3 * Math.sin(t * 2.1) : 0);          // sad droop
+  uniforms.uMouthY.value = face.mouthY.value;
+  uniforms.uMouthX.value = face.mouthX.value;
+  uniforms.uEyeY.value = face.eyeY.value;
   uniforms.uEyeJit.value = live * (pose.tremble ? 1.6 * Math.sin(t * 34) : 0);         // angry tremble
-  uniforms.uTexMix.value = clamp01(face.texMix.value);
   uniforms.uFx.value = clamp01(face.fx.value);
   renderer.render(scene, camera);
 
@@ -727,25 +949,25 @@ function frame(now) {
 // ── Controls (demo and tinkering; hidden in kiosk mode) ──────────────────
 function note(text) { $('note').textContent = text; }
 function setOverride(name) { view.override = name; applyExpression(); }
-function toggleFx() { face.fx.target = face.fx.target > 0.5 ? 0 : 1; updateButtons(); }
-function updateButtons() {
-  for (const button of $('poses').querySelectorAll('button')) button.setAttribute('aria-pressed', !view.frames && button.dataset.pose === view.pose);
+function toggleFx() { face.fx.target = face.fx.target > 0.5 ? 0 : 1; updateControls(); }
+function updateControls() {
+  $('pose').value = view.pose;
   $('btn-mic').setAttribute('aria-pressed', mic.on);
   $('btn-fx').setAttribute('aria-pressed', face.fx.target > 0.5);
   $('btn-live').hidden = !(served && view.override);
 }
-POSE_KEYS.forEach((name, i) => {
-  const button = document.createElement('button');
-  button.dataset.pose = name; button.innerHTML = `${name} <u>${i + 1}</u>`;
-  button.onclick = () => setOverride(name);
-  $('poses').append(button, ' ');
-});
+for (const name of POSE_KEYS) $('pose').add(new Option(name.replace('_', ' '), name));
+$('pose').onchange = () => setOverride($('pose').value);
+function stepPose(by) { setOverride(POSE_KEYS[(POSE_KEYS.indexOf(view.pose) + by + POSE_KEYS.length) % POSE_KEYS.length]); }
+$('btn-prev').onclick = () => stepPose(-1);
+$('btn-next').onclick = () => stepPose(1);
 $('btn-mic').onclick = toggleMic;
 $('btn-fx').onclick = toggleFx;
 $('btn-live').onclick = () => { view.override = null; mic.on = false; applyExpression(); };
 addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
-  if (key >= '1' && key <= String(POSE_KEYS.length)) setOverride(POSE_KEYS[Number(key) - 1]);
+  if (e.key === 'ArrowRight') stepPose(1);
+  else if (e.key === 'ArrowLeft') stepPose(-1);
   else if (key === 'a') setOverride('speaking');
   else if (key === 'i') setOverride('idle');
   else if (key === 'm') toggleMic();
