@@ -24,39 +24,13 @@ import time
 
 from . import trace
 from .config import CHARACTER
+from .health import mic_monitor, system_health
 from .log import bmo_print
 
 SOCKET_PATH = os.environ.get("CONTROL_SOCKET", os.path.join(trace.LOG_DIR, "control.sock"))
 TURN_TIMEOUT_SEC = 180
 
 _started_at = time.time()
-
-
-def _read_first_line(path: str) -> str | None:
-    try:
-        with open(path) as f:
-            return f.readline().strip()
-    except OSError:
-        return None
-
-
-def system_health() -> dict:
-    """Cheap host readings: CPU temperature, memory, load."""
-    health = {}
-    temp = _read_first_line("/sys/class/thermal/thermal_zone0/temp")
-    if temp and temp.isdigit():
-        health["cpu_temp_c"] = round(int(temp) / 1000, 1)
-    try:
-        with open("/proc/meminfo") as f:
-            info = dict(line.split(":", 1) for line in f)
-        health["mem_available_mb"] = int(info["MemAvailable"].split()[0]) // 1024
-    except (OSError, KeyError, ValueError):
-        pass
-    try:
-        health["load_1m"] = round(os.getloadavg()[0], 2)
-    except OSError:
-        pass
-    return health
 
 
 def status(conversation) -> dict:
@@ -68,7 +42,7 @@ def status(conversation) -> dict:
     return {
         "character": CHARACTER.name,
         "pid": os.getpid(),
-        "uptime_s": int(time.time() - _started_at),
+        "agent_uptime_s": int(time.time() - _started_at),
         "phase": store.phase.value,
         "expression": store.expression,
         "muted": store.muted,
@@ -81,7 +55,8 @@ def status(conversation) -> dict:
         "stt_on_npu": is_stt_npu(),
         "history_messages": max(len(getattr(conversation.brain, "history", [])) - 1, 0),
         "last_turn": turns[0] if turns else None,
-        **system_health(),
+        "mic": mic_monitor.snapshot(),
+        "system": system_health(),
     }
 
 

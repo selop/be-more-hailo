@@ -9,6 +9,7 @@
     bmoctl.py stats [-n 50]             timing summary over recent turns
     bmoctl.py events [-n 20]            boot, timer, music and error events
     bmoctl.py screenshot [file.png]     capture what is on the display
+    bmoctl.py watch [-i 2]              one JSON line of readings every 2 s (for the monitor)
 
 Add --quiet to say/hear to run the turn without sound. Add --json to any
 command for machine-readable output. From another machine use
@@ -24,6 +25,7 @@ import socket
 import statistics
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -134,6 +136,32 @@ def stats(turns: list[dict]) -> dict:
     }
 
 
+def sample() -> dict:
+    """One monitoring sample: host readings always, agent and microphone
+    readings when the agent answers."""
+    reply = request({"cmd": "status"}, timeout=5)
+    record = {"t": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if reply.get("ok"):
+        status = reply["status"]
+        last = status.get("last_turn") or {}
+        record["system"] = status.get("system", {})
+        record["mic"] = status.get("mic", {})
+        record["agent"] = {key: status.get(key) for key in (
+            "phase", "expression", "muted", "showing_image", "llm_ready", "stt_on_npu",
+            "agent_uptime_s", "history_messages")}
+        record["agent"]["timers"] = len(status.get("timers") or [])
+        record["last_turn"] = {key: last.get(key) for key in (
+            "id", "source", "status", "transcript", "response_ms", "wake_score")} if last else None
+        if last.get("spoken"):
+            record["last_turn"]["said"] = _reply_text(last)[:120]
+    else:
+        from core.health import system_health        # the agent is down: still report the host
+        record["system"] = system_health()
+        record["agent"] = None
+        record["agent_error"] = reply.get("error")
+    return record
+
+
 def screenshot(path: str) -> dict:
     """Capture the Wayland display with grim."""
     env = dict(os.environ)
@@ -165,6 +193,7 @@ def main(argv=None) -> int:
         sub.add_parser(name).add_argument("-n", type=int, default=default)
     sub.add_parser("show").add_argument("turn_id", nargs="?", default="last")
     sub.add_parser("screenshot").add_argument("file", nargs="?", default=os.path.join(trace.LOG_DIR, "screenshot.png"))
+    sub.add_parser("watch").add_argument("-i", type=float, default=2.0, help="seconds between samples")
     args = p.parse_args(argv)
 
     def out(obj, pretty=None):
@@ -172,6 +201,14 @@ def main(argv=None) -> int:
             print(json.dumps(obj, indent=2, ensure_ascii=False))
         else:
             pretty()
+
+    if args.cmd == "watch":
+        try:
+            while True:
+                print(json.dumps(sample(), ensure_ascii=False), flush=True)
+                time.sleep(max(args.i, 0.5))
+        except (KeyboardInterrupt, BrokenPipeError):
+            return 0
 
     if args.cmd == "status":
         reply = request({"cmd": "status"}, timeout=10)

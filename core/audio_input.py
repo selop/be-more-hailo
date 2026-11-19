@@ -12,6 +12,7 @@ import numpy as np
 import sounddevice as sd
 
 from . import trace
+from .health import mic_monitor
 from .config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_THRESHOLD, SILENCE_THRESHOLD
 from .log import bmo_print
 
@@ -45,6 +46,7 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
         start an injected test turn).
     """
     CHUNK = 1280
+    mic_monitor.threshold = WAKE_WORD_THRESHOLD
     capture_rate = MIC_SAMPLE_RATE
     target_rate = 16000
     downsample_factor = capture_rate // target_rate
@@ -59,17 +61,21 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
                     oww.reset()
                     return True
 
+                rms = float(np.sqrt(np.mean(audio_16k.astype(np.float32) ** 2)))
                 if get_state() in suppressed_states or (extra_suppress_fn and extra_suppress_fn()):
+                    mic_monitor.heard(rms, None, True)
                     oww.reset()
                     continue
 
                 oww.predict(audio_16k)
+                mic_monitor.heard(rms, max(float(v[-1]) for v in oww.prediction_buffer.values()), False)
 
                 for key in oww.prediction_buffer.keys():
                     if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
                         bmo_print("WAKE", f"Detected: {key}")
                         global last_wake_score
                         last_wake_score = round(float(oww.prediction_buffer[key][-1]), 3)
+                        mic_monitor.detected(last_wake_score)
                         oww.reset()
                         return True
     except Exception as e:

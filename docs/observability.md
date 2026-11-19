@@ -22,6 +22,28 @@ On the Pi itself, call `venv/bin/python scripts/bmoctl.py <command>` from the pr
 
 `--quiet` runs a turn without playing sound: the reply is still generated and synthesised, and the trace is the same.
 
+## Live monitor
+
+`python scripts/bmo_monitor.py` runs on the development machine and shows a dashboard that refreshes every two seconds: board temperature, fan step and speed, throttling and under-voltage flags, clock, load, memory (agent and browser), Wi-Fi signal, the agent's phase and models, the microphone, and the last turn. It lists problems in plain words, keeps every sample in `logs/monitor-<date>.jsonl` on the development machine, and reconnects after a dropped connection.
+
+```bash
+python scripts/bmo_monitor.py                 # dashboard until Ctrl+C, then a summary
+python scripts/bmo_monitor.py --duration 60   # one line per sample for a minute, then min/median/max
+python scripts/bmo_monitor.py --once          # one reading
+```
+
+The microphone readings come from the wake-word loop itself (`MicMonitor` in `core/health.py`), over the last 30 seconds:
+
+| Reading | Meaning |
+|---|---|
+| `level_now`, `level_peak` | RMS of the 16-bit samples (full scale 32768) |
+| `noise_floor` | The quietest fifth of the window: the room without speech |
+| `wake_score_now`, `wake_score_max` | The wake-word model's score, to compare with `wake_threshold` |
+| `detections`, `last_detection_score` | Wake words recognised since the agent started |
+| `listening` | False while a turn runs (the recorder has the mic) or when no audio arrives |
+
+When the wake word does not get through, say it with the monitor open: a `wake_score_max` just under the threshold means it was heard but scored too low; a flat level means the mic is not hearing you.
+
 ## What a turn trace contains
 
 Each turn is one JSON line in `logs/turns.jsonl`.

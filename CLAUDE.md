@@ -26,7 +26,7 @@ sudo journalctl -u bmo-gui -f  # view logs
 
 Tests that need no hardware live in `tests/` and run with `pytest tests/` or directly (`python tests/test_character.py`, `python tests/test_turn.py`, `python tests/test_brain.py`, `python tests/test_timers.py`, `python tests/test_display.py`).
 
-To test on the device without speaking, use `scripts/bmo-remote.sh` (see `docs/observability.md`): `say "..." --quiet` runs a real turn from text and prints its trace, `turns`/`stats` read past turns, `screenshot` captures the display. Verify a change there before calling it done. Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually on the Pi.
+To test on the device without speaking, use `scripts/bmo-remote.sh` (see `docs/observability.md`): `say "..." --quiet` runs a real turn from text and prints its trace, `turns`/`stats` read past turns, `screenshot` captures the display. `python scripts/bmo_monitor.py --duration 60` reads temperature, fan, throttling, memory and the microphone (level, noise floor, wake-word score) for a minute. Verify a change there before calling it done. Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually on the Pi.
 
 ## Architecture
 
@@ -41,6 +41,7 @@ agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──�
                          ├── turn.py         # Conversation: turn loop, speaking, timers, music (no Tkinter)
                          ├── trace.py        # Per-turn traces and events written to logs/ (see docs/observability.md)
                          ├── control.py      # Local control socket: inject test turns, query status
+                         ├── health.py       # Host readings (temperature, fan, throttling, memory) and the mic monitor
                          ├── display_server.py # Serves the live face page and streams engine events to it
                          ├── state.py        # Centralized StateStore: Phase enum + expression (see docs/state-store.md)
                          ├── config.py       # Paths, models, ALSA devices; exposes the active CHARACTER

@@ -118,5 +118,8 @@ Still open:
 
 ## Observed, not yet analysed
 
+- **The fan is audible to the microphone, and the live face keeps it at the higher step.** Measured on the Pi on 2026-11-19 with the live face running: the board sits at 58–62 °C, right at the 60 °C trip point, so the fan stays on step 2 (about 6,360 rpm, against about 3,960 rpm on step 1 earlier the same day). Forcing the fan off for 14 s lowered the mic's median level from 312 to 216 and its minimum from 204 to 125; it rose again when the fan came back. A wake word still scored 0.748 against the 0.35 threshold with the fan on step 2. Candidates: cap the face at 30 frames per second, or move the mic away from the fan.
+- **The Pi drops off the network for short periods.** Several SSH sessions were cut on 2026-11-19 although Wi-Fi signal read −30 to −37 dBm. Cause unknown.
+
 - **Web search feeds news to weather questions.** "What's the weather today in ... Germany?" returned a travel article and the reply was about "remote small towns in the UK" (`core/search.py` tries news first).
 - **Reply quality of the 1.5B model.** "Tell me something nice" produced "Sure, let me know something nice! How about you tell them?". Use `scripts/bmo-remote.sh say` with a fixed set of prompts to compare models after the HailoRT upgrade.
