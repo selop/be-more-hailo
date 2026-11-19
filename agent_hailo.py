@@ -289,10 +289,19 @@ class BotGUI:
         if self.voice_eq.is_visible():
             return
         held = time.time() - self._press_time
-        if held >= 1.5:
+        if held >= 5.0:
+            self._shutdown()
+        elif held >= 1.5:
             self._open_eq()
         else:
             self.mute_bmo(event)
+
+    def _shutdown(self):
+        """Stop BMO from the touchscreen (5s long press)."""
+        bmo_print("SHUTDOWN", "Long press shutdown triggered")
+        self.store.set_phase(Phase.ERROR, msg="Shutting down...")
+        self.stop_event.set()
+        self.master.after(500, self.master.quit)
 
     def _open_eq(self):
         bmo_print("EQ", "Opening voice EQ tuner")

@@ -95,19 +95,60 @@ cd be-more-agent && chmod +x *.sh && ./setup.sh
 
 ## Running
 
+### Quick start (manual)
+
 ```bash
-# Web interface (kiosk mode — installs service + auto-opens Chromium)
-./setup_web.sh
+source venv/bin/activate
 
-# Web interface (manual)
-source venv/bin/activate && ./start_web.sh
+# On-device GUI (fullscreen Tkinter on HDMI/DSI display)
+./start_agent.sh
 
-# On-device GUI (fullscreen Tkinter)
-source venv/bin/activate && ./start_agent.sh
+# Web interface (browser at http://<pi-ip>:8080)
+./start_web.sh
+```
 
-# Systemd services
+### Systemd services (production)
+
+Install both services so BMO starts automatically on boot:
+
+```bash
 ./setup_services.sh
-sudo systemctl start|stop|restart bmo-gui  # or bmo-web
+```
+
+This creates two systemd units — **`bmo-gui`** (Tkinter fullscreen) and **`bmo-web`** (FastAPI on port 8080) — enables them on boot, and starts them immediately. You typically only need one; disable the other:
+
+```bash
+# Run only the GUI (disable web)
+sudo systemctl disable --now bmo-web
+
+# Run only the web UI (disable GUI)
+sudo systemctl disable --now bmo-gui
+```
+
+Common service commands:
+
+```bash
+# Start / stop / restart
+sudo systemctl start bmo-gui
+sudo systemctl stop bmo-gui
+sudo systemctl restart bmo-gui
+
+# Check status
+sudo systemctl status bmo-gui
+
+# Follow logs (Ctrl+C to quit)
+sudo journalctl -u bmo-gui -f
+
+# Same commands work for bmo-web
+sudo journalctl -u bmo-web -f
+```
+
+### Kiosk mode (web)
+
+Opens Chromium fullscreen on the Pi's display pointing at the web UI:
+
+```bash
+./setup_web.sh
 ```
 
 ---

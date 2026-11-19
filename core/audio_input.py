@@ -105,6 +105,7 @@ def record_until_silence(
 
     def callback(indata, frames_count, time_info, status):
         nonlocal silent_chunks, has_spoken, max_vol_seen
+
         if time.time() < ignore_until:
             return
         vol = np.linalg.norm(indata) * 10
