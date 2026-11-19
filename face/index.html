@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BMO face prototype</title>
+<!--
+  Prototype: BMO's face drawn live with three.js in place of PNG frames.
+
+  The whole face is one full-screen quad. A fragment shader draws eyes and
+  mouth from a handful of numbers (blink, eye shape, gaze, mouth opening and
+  width), so any pose blends smoothly into any other and edges stay crisp at
+  every size. Geometry and colours are taken from generate_faces.py.
+
+  Open this file in a browser. Keys: I idle, A answering, M microphone,
+  C CRT look on/off, H hide controls. Touch: left half switches
+  idle/answering, right half switches the CRT look. URL parameters for still frames:
+  ?state=answering&freeze=1&open=45&width=62&blink=0&fx=0&kiosk=1&t=3
+
+  three.js is loaded from a CDN here; on the Pi it would be bundled locally.
+-->
+<style>
+  :root { --frame: #1c201a; --ink: #bdffcb; --dim: #5d7a63; --accent: #38b5a0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--frame); overflow: hidden; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center;
+         font: 13px/1.4 'Courier New', ui-monospace, monospace; color: var(--ink); }
+  #stage { position: relative; width: min(100vw, calc((100vh - 64px) * 800 / 480)); aspect-ratio: 800 / 480; }
+  body.kiosk #stage { width: min(100vw, calc(100vh * 800 / 480)); }
+  canvas { display: block; width: 100%; height: 100%; }
+  #bar { height: 64px; display: flex; gap: 10px; align-items: center; padding: 0 16px; flex-wrap: wrap; justify-content: center; }
+  body.kiosk #bar { display: none; }
+  body.kiosk, body.kiosk canvas { cursor: none; }
+  button { font: inherit; color: var(--ink); background: transparent; border: 2px solid var(--dim);
+           border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #0d1410; font-weight: bold; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  #fps { color: var(--dim); min-width: 12ch; text-align: right; }
+  #note { color: var(--dim); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="face" aria-label="BMO's face"></canvas></div>
+<div id="bar">
+  <button id="btn-idle" aria-pressed="true">Idle <u>I</u></button>
+  <button id="btn-answering" aria-pressed="false">Answering <u>A</u></button>
+  <button id="btn-mic" aria-pressed="false" title="Drive the mouth with your voice">Microphone <u>M</u></button>
+  <button id="btn-fx" aria-pressed="true" title="Curved glass, scanlines, phosphor glow, colour fringes, flicker">CRT <u>C</u></button>
+  <span id="note"></span>
+  <span id="fps"></span>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js';
+
+// ── Shader: the face in 800×480 "face pixels", y pointing down ────────────
+const fragmentShader = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+
+uniform float uPx;         // face pixels covered by one screen pixel (for edge smoothing)
+uniform float uTime;
+uniform vec2  uGaze;       // eye offset
+uniform float uBob;        // vertical offset of the whole face
+uniform float uBlinkL;     // 0 open … 1 closed
+uniform float uBlinkR;
+uniform float uDot;        // 0 = U-shaped idle eye … 1 = round talking eye
+uniform float uEyeScale;
+uniform float uMouthOpen;  // mouth height, 0 (closed line) … 65
+uniform float uMouthW;     // mouth width
+uniform float uSmile;      // bends the mouth: + smile, − frown
+uniform float uFx;         // 0 flat (as today) … 1 CRT tube
+
+const vec3 BG     = vec3(189., 255., 203.) / 255.;
+const vec3 LINE   = vec3(0.);
+const vec3 CAVITY = vec3( 41., 131.,  57.) / 255.;
+const vec3 TONGUE = vec3(112., 195., 112.) / 255.;
+const vec3 TEETH  = vec3(1.);
+
+const float STROKE = 8.0;
+const vec2  EYE_L  = vec2(217., 195.);
+const vec2  EYE_R  = vec2(581., 195.);
+const vec2  MOUTH  = vec2(399., 302.);
+// Idle eye: an arc open at the top with a 130° gap (aperture 115° from straight down)
+const vec2  ARC_SC = vec2(0.9063078, -0.4226183);
+
+float gSoft = 0.0;        // extra edge softness, used to draw the blurred copy for the glow
+float cover(float d) { return clamp(0.5 - d / (uPx + gSoft), 0.0, 1.0); }   // 1 inside, 0 outside
+
+float sdSegment(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a, ba = b - a;
+  return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+}
+float sdArc(vec2 p, vec2 sc, float ra) {
+  p.x = abs(p.x);
+  return (sc.y * p.x > sc.x * p.y) ? length(p - sc * ra) : abs(length(p) - ra);
+}
+float sdRoundBox(vec2 p, vec2 halfSize, float r) {
+  vec2 q = abs(p) - halfSize + r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float eye(vec2 p, vec2 centre, float blink) {
+  vec2 q = (p - centre - uGaze) / uEyeScale;
+  // Closing squashes the eye towards its visual centre line, then it becomes a flat lid
+  float squash = 1.0 - 0.82 * blink;
+  vec2 s = vec2(q.x, 5.0 + (q.y - 5.0) / squash);
+  float arc  = sdArc(s, ARC_SC, 14.0) - STROKE * 0.5;
+  float dot_ = length(s - vec2(0.0, 5.0)) - 17.0;
+  float open = mix(arc, dot_, uDot) * squash;
+  float lid  = sdSegment(q, vec2(-18.0, 5.0), vec2(18.0, 5.0)) - STROKE * 0.5;
+  return mix(open, lid, smoothstep(0.55, 1.0, blink)) * uEyeScale;
+}
+
+// The flat face at face-pixel position p
+vec3 faceColor(vec2 p) {
+  vec3 col = BG;
+
+  // Eyes
+  float dEyes = min(eye(p, EYE_L, uBlinkL), eye(p, EYE_R, uBlinkR));
+
+  // Mouth: a line that opens into a pill with teeth and tongue
+  vec2 q = p - MOUTH;
+  float halfW = uMouthW * 0.5;
+  q.y += uSmile * (1.0 - clamp(q.x * q.x / (halfW * halfW), 0.0, 1.0)) - uSmile * 0.5;
+  float h = max(uMouthOpen, STROKE);
+  float caps = 4.0 * (1.0 - smoothstep(STROKE, 16.0, uMouthOpen));   // round ends of the closed line
+  vec2 halfSize = vec2(halfW + caps, h * 0.5);
+  float dMouth = sdRoundBox(q, halfSize, halfSize.y);
+  float dInner = dMouth + STROKE;
+
+  vec3 inside = CAVITY;
+  float teethH = min(12.0, h / 3.0);
+  float top = -halfSize.y + STROKE;
+  float dTeeth = sdRoundBox(q - vec2(0.0, top + teethH * 0.5), vec2(halfSize.x - STROKE, teethH * 0.5), min(teethH * 0.5, 5.0));
+  inside = mix(inside, TEETH, cover(dTeeth) * smoothstep(18.0, 26.0, h));
+  float tongueH = min(20.0, h * 0.5);
+  float tongueRx = max(halfW - 15.0, 1.0);
+  float tongueRy = tongueH * 0.75;
+  float bottom = halfSize.y - STROKE;
+  float dTongue = (length(vec2(q.x / tongueRx, (q.y - (bottom - tongueH * 0.25)) / tongueRy)) - 1.0) * min(tongueRx, tongueRy);
+  inside = mix(inside, TONGUE, cover(dTongue) * smoothstep(28.0, 36.0, h));
+
+  col = mix(col, LINE, cover(dEyes));
+  col = mix(col, LINE, cover(dMouth));
+  col = mix(col, inside, cover(dInner));
+  return col;
+}
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+// ── CRT tube ─────────────────────────────────────────────────────────────
+// Every effect is scaled by uFx, so 0 gives exactly the flat face.
+const vec3  BEZEL  = vec3(0.035, 0.045, 0.04);
+const vec2  ASPECT = vec2(800.0 / 480.0, 1.0);
+
+void main() {
+  vec2 c = vUv * 2.0 - 1.0;                       // −1 … 1 across the glass
+
+  // Curved glass: the picture bulges towards the viewer
+  vec2 cc = c * (1.0 + uFx * vec2(0.05 * c.y * c.y, 0.085 * c.x * c.x)) * (1.0 + 0.04 * uFx);
+  vec2 uv = cc * 0.5 + 0.5;
+  vec2 p = vec2(uv.x * 800.0, (1.0 - uv.y) * 480.0);
+  float line = p.y;                               // scanline position, before the face moves
+  p.y -= uBob;
+
+  // Now and then a few lines tear sideways for an instant
+  float glitch = step(0.975, hash(vec2(floor(uTime * 9.0), 3.0)));
+  p.x += uFx * glitch * 3.0 * sin(line * 0.35 + uTime * 40.0) * smoothstep(0.0, 1.0, hash(vec2(floor(line / 24.0), floor(uTime * 9.0))));
+
+  vec3 col;
+  if (uFx < 0.002) {
+    col = faceColor(p);
+  } else {
+    // Colour fringes: red and blue land slightly apart, more so near the edges
+    float fringe = uFx * (0.7 + 2.6 * dot(c, c));
+    col.r = faceColor(p + vec2(fringe, 0.0)).r;
+    col.g = faceColor(p).g;
+    col.b = faceColor(p - vec2(fringe, 0.0)).b;
+
+    // Phosphor glow: a blurred copy of the picture bleeds over the sharp one
+    gSoft = 16.0;
+    vec3 glow = faceColor(p);
+    gSoft = 0.0;
+    col = mix(col, glow, 0.30 * uFx) + 0.02 * uFx * glow;
+
+    // Scanlines, thinner where the picture is bright
+    float brightness = dot(col, vec3(0.3, 0.6, 0.1));
+    float scan = 0.5 + 0.5 * cos(line * 3.14159265);
+    col *= 1.0 - uFx * (0.34 - 0.16 * brightness) * (1.0 - scan);
+
+    // Shadow mask: red, green and blue phosphor stripes
+    float stripe = mod(gl_FragCoord.x, 3.0);
+    vec3 mask = vec3(step(stripe, 1.0), step(1.0, stripe) * step(stripe, 2.0), step(2.0, stripe));
+    col *= mix(vec3(1.0), 0.80 + 0.45 * mask, 0.55 * uFx);
+
+    // A brighter band rolls slowly down the tube, plus mains flicker and grain
+    float roll = fract(uv.y + uTime * 0.06);
+    col *= 1.0 + uFx * 0.07 * smoothstep(0.0, 0.05, roll) * (1.0 - smoothstep(0.05, 0.22, roll));
+    col *= 1.0 + uFx * 0.014 * sin(uTime * 97.0);
+    col += uFx * 0.045 * (hash(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5);
+
+    col *= 1.0 + 0.10 * uFx;                                        // make up for what the mask took
+    col *= 1.0 - uFx * 0.42 * pow(dot(c, c) * 0.5, 1.4);            // darker towards the corners
+    vec2 shine = c - vec2(-0.5, 0.55);
+    col += uFx * 0.05 * exp(-dot(shine, shine) * 5.0);              // reflection on the glass
+  }
+
+  // Edge of the tube: rounded corners, a shadow just inside, the bezel outside
+  float edge = sdRoundBox(cc * ASPECT, ASPECT, 0.16 * uFx + 0.0001);
+  col *= 1.0 - uFx * 0.6 * smoothstep(-0.07, 0.0, edge);
+  float px = 2.0 * uPx / 480.0;
+  col = mix(BEZEL, col, clamp(0.5 - edge / px, 0.0, 1.0));
+
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+const vertexShader = /* glsl */`
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+// ── three.js setup ───────────────────────────────────────────────────────
+const canvas = document.getElementById('face');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const uniforms = {
+  uPx: { value: 1 }, uTime: { value: 0 },
+  uGaze: { value: new THREE.Vector2() }, uBob: { value: 0 },
+  uBlinkL: { value: 0 }, uBlinkR: { value: 0 },
+  uDot: { value: 0 }, uEyeScale: { value: 1 },
+  uMouthOpen: { value: 0 }, uMouthW: { value: 97 }, uSmile: { value: 0 },
+  uFx: { value: 0 },
+};
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader })));
+
+function resize() {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(w, h, false);
+  uniforms.uPx.value = 800 / (w * ratio);
+}
+new ResizeObserver(resize).observe(canvas);
+
+// ── Motion ───────────────────────────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+const rand = (a, b) => a + Math.random() * (b - a);
+
+// A value that eases towards its target (critically damped spring)
+class Eased {
+  constructor(value, speed) { this.value = value; this.target = value; this.velocity = 0; this.speed = speed; }
+  step(dt) {
+    const k = this.speed * this.speed, c = 2 * this.speed;
+    this.velocity += (k * (this.target - this.value) - c * this.velocity) * dt;
+    this.value += this.velocity * dt;
+    return this.value;
+  }
+}
+
+const face = {
+  state: 'idle',
+  dot: new Eased(0, 22),            // eye shape
+  mouthOpen: new Eased(0, 38),
+  mouthW: new Eased(97, 30),
+  gazeX: new Eased(0, 9), gazeY: new Eased(0, 9),
+  fx: new Eased(0, 5),
+  eyeScale: new Eased(1, 30),
+};
+
+// Blinking: quick close, slightly slower open; now and then a double blink
+const blink = { start: -1, next: rand(1.5, 3.5), double: false };
+function blinkAmount(t) {
+  if (t >= blink.next && blink.start < 0) { blink.start = t; blink.double = Math.random() < 0.18; }
+  if (blink.start < 0) return 0;
+  const e = t - blink.start, close = 0.07, hold = 0.04, open = 0.11;
+  let v = 0;
+  if (e < close) v = e / close;
+  else if (e < close + hold) v = 1;
+  else if (e < close + hold + open) v = 1 - (e - close - hold) / open;
+  else {
+    blink.start = -1;
+    blink.next = t + (blink.double ? 0.12 : rand(2.4, 6.0));
+    blink.double = false;
+  }
+  return v * v * (3 - 2 * v);
+}
+
+// Gaze: mostly forward, an occasional glance to the side
+const gaze = { next: rand(2, 5) };
+function updateGaze(t) {
+  if (t < gaze.next) return;
+  if (Math.abs(face.gazeX.target) > 0.5 || Math.random() < 0.45) { face.gazeX.target = 0; face.gazeY.target = 0; }
+  else { face.gazeX.target = rand(-9, 9); face.gazeY.target = rand(-3, 3); }
+  gaze.next = t + rand(1.2, 4.5);
+}
+
+// Speech loudness. Without a microphone this invents a believable rhythm:
+// syllables of varying strength, short gaps between words, longer pauses between sentences.
+const speech = { level: 0, shape: 0.5, until: 0, target: 0, syllablesLeft: 0 };
+function syntheticLoudness(t, dt) {
+  if (t >= speech.until) {
+    if (speech.syllablesLeft <= 0) {            // pause between sentences
+      speech.target = 0; speech.until = t + rand(0.35, 0.8); speech.syllablesLeft = Math.floor(rand(5, 14));
+    } else if (speech.target > 0.05 && Math.random() < 0.3) {   // gap between words
+      speech.target = 0; speech.until = t + rand(0.05, 0.12);
+    } else {
+      speech.target = rand(0.35, 1.0); speech.shape = Math.random();
+      speech.until = t + rand(0.09, 0.2); speech.syllablesLeft--;
+    }
+  }
+  const rate = speech.target > speech.level ? 34 : 16;      // fast attack, slower release
+  speech.level += (speech.target - speech.level) * Math.min(1, rate * dt);
+  return speech.level;
+}
+
+// Microphone: the mouth follows the loudness of whatever it hears
+const mic = { on: false, analyser: null, data: null, floor: 0.01, peak: 0.08, level: 0 };
+async function toggleMic() {
+  if (mic.on) { mic.on = false; updateButtons(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new AudioContext();
+    mic.analyser = ctx.createAnalyser(); mic.analyser.fftSize = 1024;
+    mic.data = new Float32Array(mic.analyser.fftSize);
+    ctx.createMediaStreamSource(stream).connect(mic.analyser);
+    mic.on = true; setState('answering'); note('Talk: the mouth follows your voice.');
+  } catch (err) { note('Microphone unavailable: ' + err.message); }
+  updateButtons();
+}
+function micLoudness(dt) {
+  mic.analyser.getFloatTimeDomainData(mic.data);
+  let sum = 0;
+  for (const v of mic.data) sum += v * v;
+  const rms = Math.sqrt(sum / mic.data.length);
+  mic.peak = Math.max(mic.peak * (1 - 0.15 * dt), rms, 0.03);      // slow automatic gain
+  const target = Math.min(1, Math.max(0, (rms - mic.floor) / (mic.peak - mic.floor)));
+  const rate = target > mic.level ? 40 : 14;
+  mic.level += (target - mic.level) * Math.min(1, rate * dt);
+  speech.shape += (Math.random() - 0.5) * 6 * dt;
+  speech.shape = Math.min(1, Math.max(0, speech.shape));
+  return mic.level;
+}
+
+function setState(state) {
+  face.state = state;
+  face.dot.target = state === 'answering' ? 1 : 0;
+  updateButtons();
+}
+
+// For the engine later: window.bmoFace.set({ state: 'answering', loudness: 0.6 })
+const external = { loudness: null };
+window.bmoFace = {
+  set({ state, loudness } = {}) {
+    if (state) setState(state);
+    if (loudness !== undefined) external.loudness = loudness;
+  },
+};
+
+// ── Frame loop ───────────────────────────────────────────────────────────
+const frozen = params.has('freeze');
+let last = performance.now(), frames = 0, fpsSince = last, clock = Number(params.get('t') || 0);
+const fpsLabel = document.getElementById('fps');
+
+function frame(now) {
+  const dt = frozen ? 1 / 60 : Math.min((now - last) / 1000, 0.05);
+  last = now; clock += frozen ? 0 : dt;
+  const t = clock;
+
+  let loud = 0;
+  if (face.state === 'answering') {
+    loud = external.loudness !== null ? external.loudness : (mic.on ? micLoudness(dt) : syntheticLoudness(t, dt));
+  }
+  // Loud, open sounds are tall and narrow; quiet ones short and wide (as in the hand-made frames)
+  const tall = loud * (0.75 + 0.25 * speech.shape);
+  face.mouthOpen.target = loud < 0.06 ? 0 : 14 + 46 * tall;
+  face.mouthW.target = loud < 0.06 ? 97 : 90 - 34 * tall * (0.6 + 0.4 * speech.shape);
+  face.eyeScale.target = 1 + 0.05 * loud;
+
+  updateGaze(t);
+  let blinkValue = blinkAmount(t);
+
+  if (frozen) {     // still frames from URL parameters
+    for (const item of Object.values(face)) if (item instanceof Eased) { item.value = item.target; item.velocity = 0; }
+    if (params.has('open')) face.mouthOpen.value = Number(params.get('open'));
+    if (params.has('width')) face.mouthW.value = Number(params.get('width'));
+    blinkValue = Number(params.get('blink') || 0);
+    face.gazeX.value = Number(params.get('gaze') || 0); face.gazeY.value = 0;
+  } else {
+    for (const item of Object.values(face)) if (item instanceof Eased) item.step(dt);
+  }
+
+  uniforms.uTime.value = t;
+  uniforms.uDot.value = Math.min(1, Math.max(0, face.dot.value));
+  uniforms.uBlinkL.value = blinkValue; uniforms.uBlinkR.value = blinkValue;
+  uniforms.uGaze.value.set(face.gazeX.value, face.gazeY.value);
+  uniforms.uEyeScale.value = face.eyeScale.value;
+  uniforms.uMouthOpen.value = Math.max(0, face.mouthOpen.value);
+  uniforms.uMouthW.value = face.mouthW.value;
+  uniforms.uBob.value = frozen ? 0 : 1.6 * Math.sin(t * 1.5) + (face.state === 'answering' ? 1.2 * loud : 0);   // breathing
+  uniforms.uFx.value = face.fx.value;
+  renderer.render(scene, camera);
+
+  frames++;
+  if (now - fpsSince > 1000) { fpsLabel.textContent = Math.round(frames * 1000 / (now - fpsSince)) + ' fps'; frames = 0; fpsSince = now; }
+  requestAnimationFrame(frame);
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+function note(text) { $('note').textContent = text; }
+function updateButtons() {
+  $('btn-idle').setAttribute('aria-pressed', face.state === 'idle');
+  $('btn-answering').setAttribute('aria-pressed', face.state === 'answering');
+  $('btn-mic').setAttribute('aria-pressed', mic.on);
+  $('btn-fx').setAttribute('aria-pressed', face.fx.target > 0.5);
+}
+function toggleFx() { face.fx.target = face.fx.target > 0.5 ? 0 : 1; updateButtons(); }
+$('btn-idle').onclick = () => setState('idle');
+$('btn-answering').onclick = () => setState('answering');
+$('btn-mic').onclick = toggleMic;
+$('btn-fx').onclick = toggleFx;
+addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase();
+  if (key === 'i') setState('idle');
+  else if (key === 'a') setState('answering');
+  else if (key === 'm') toggleMic();
+  else if (key === 'c' || key === 's') toggleFx();
+  else if (key === 'h') document.body.classList.toggle('kiosk');
+});
+
+// On a touchscreen: tap the left half to switch idle/answering, the right half for CRT on/off
+canvas.addEventListener('pointerdown', (e) => {
+  const left = e.offsetX < canvas.clientWidth / 2;
+  if (left) setState(face.state === 'idle' ? 'answering' : 'idle'); else toggleFx();
+});
+
+if (params.has('kiosk')) document.body.classList.add('kiosk');
+// The CRT look is on unless ?fx=0
+if (params.get('fx') !== '0') { face.fx.target = 1; face.fx.value = 1; }
+setState(params.get('state') === 'answering' ? 'answering' : 'idle');
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
