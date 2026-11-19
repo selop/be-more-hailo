@@ -2,17 +2,19 @@
 import tkinter as tk
 import tkinter.font as tkFont
 
+from .config import CHARACTER
+
 
 class ThoughtBubble:
     """Animated comic-style thought bubble with trailing dots and slide animation."""
 
-    # Face background is #bdffcb — canvas must match so it's invisible
-    FACE_BG    = '#bdffcb'
+    # Canvas must match the face background so it's invisible
+    FACE_BG    = CHARACTER.theme["face_bg"]
 
-    # White bubble with dark green outline — pops against the green face
-    FILL       = '#ffffff'
-    OUTLINE    = '#2a6b3a'
-    TEXT_CLR   = '#1a4a28'
+    # Bubble colours come from the character's theme
+    FILL       = CHARACTER.theme["bubble_fill"]
+    OUTLINE    = CHARACTER.theme["bubble_outline"]
+    TEXT_CLR   = CHARACTER.theme["bubble_text"]
     OUTLINE_W  = 2
 
     # Typography

@@ -49,6 +49,7 @@ ehthumbs.db
 
 # --- Debug / Temp files (created during dev/testing) ---
 test_*.py
+!tests/test_*.py
 list_devices.py
 install_*.sh
 *.log
@@ -57,3 +58,9 @@ pull.json
 setup_remote.sh
 tmp_hailo_whisper/
 whisper.cpp/build/
+
+# Turn traces, kept recordings and the control socket (stay on the device)
+logs/
+
+# Skill evaluation runs
+.claude/skills/*-workspace/

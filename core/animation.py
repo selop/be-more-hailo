@@ -6,6 +6,7 @@ import time
 
 from PIL import Image, ImageTk
 
+from .config import CHARACTER, FACES_DIR
 from .log import bmo_print
 
 
@@ -34,12 +35,8 @@ class AnimationEngine:
         Target frame dimensions (default 800×480).
     """
 
-    SCREENSAVER_STATES = [
-        "idle", "happy", "sleepy", "heart", "starry_eyed",
-        "cheeky", "dizzy", "confused",
-        "daydream", "bored", "jamming", "curious",
-        "football", "detective", "sir_mano", "low_battery", "bee",
-    ]
+    # Face folders cycled by the silent screensaver (from the character pack)
+    SCREENSAVER_STATES = CHARACTER.screensaver_faces
 
     def __init__(
         self,
@@ -82,7 +79,7 @@ class AnimationEngine:
     # ------------------------------------------------------------------
 
     def _load(self, all_states):
-        base = "faces"
+        base = FACES_DIR
         for state in all_states:
             path = os.path.join(base, state)
             self.animations[state] = []

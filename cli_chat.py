@@ -1,9 +1,10 @@
 import time
 import sys
+from core.config import CHARACTER
 from core.llm import Brain, init_llm
 
 def main():
-    print("Initializing BMO Brain...")
+    print(f"Initializing {CHARACTER.name} Brain...")
     try:
         init_llm()
         brain = Brain()
@@ -11,7 +12,7 @@ def main():
         print(f"Failed to initialize Brain: {e}")
         sys.exit(1)
         
-    print("BMO is ready! Type 'exit' or 'quit' to stop.")
+    print(f"{CHARACTER.name} is ready! Type 'exit' or 'quit' to stop.")
     print("-" * 50)
 
     while True:
@@ -28,7 +29,7 @@ def main():
             response = brain.think(user_input)
             end_time = time.time()
 
-            print(f"\nBMO: {response}")
+            print(f"\n{CHARACTER.name}: {response}")
             print(f"\n[Response time: {end_time - start_time:.2f} seconds]")
 
         except KeyboardInterrupt:

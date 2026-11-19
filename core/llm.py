@@ -9,7 +9,8 @@ import logging
 import re
 import time
 
-from .config import get_system_prompt
+from . import trace
+from .config import CHARACTER, get_system_prompt, say
 from .tts import add_pronunciation
 from .search import search_web
 from .log import bmo_print
@@ -54,13 +55,12 @@ _REFUSAL_PATTERNS = [
     "i cannot disclose",
     "i can't assist with",
     "i cannot assist with",
-    "please allow bmo to respond",
-    "i'm not bmo",
-    "i am not bmo",
     "as an ai",
     "as a language model",
     "don't ask me to repeat",
 ]
+_name = CHARACTER.name.lower()
+_REFUSAL_PATTERNS += [f"please allow {_name} to respond", f"i'm not {_name}", f"i am not {_name}"]
 
 
 class Brain:
@@ -148,7 +148,7 @@ class Brain:
                     logger.info(f"LLM requested web search for: {query}")
                     search_result = search_web(query)
                     summary_messages = [
-                        {"role": "system", "content": "Summarize this search result in one short, conversational sentence as BMO. Do not use markdown."},
+                        {"role": "system", "content": CHARACTER.prompt("search_summary")},
                         {"role": "user", "content": f"RESULT: {search_result}\nUser Question: {user_text}"}
                     ]
                     content = llm.generate_all(prompt=summary_messages, temperature=0.4, max_generated_tokens=100)
@@ -170,7 +170,7 @@ class Brain:
 
             # Detect stuck LLM (refusal loops / repetition)
             if self._check_stuck(content):
-                return "BMO got a little confused! Let's start fresh. How can I help?"
+                return say("confused_reset")
 
             # Clean injected search context from history
             if search_injected:
@@ -184,7 +184,7 @@ class Brain:
 
         except Exception as e:
             logger.error(f"Brain Exception: {e}", exc_info=True)
-            return "I'm having trouble thinking right now."
+            return say("think_error")
 
     # ── Streaming inference ───────────────────────────────────────────────
 
@@ -196,15 +196,19 @@ class Brain:
         action_json = detect_pre_llm_action_json(user_text)
         if action_json is not None:
             bmo_print("LLM-STREAM", f"Pre-LLM action: {action_json[:80]}")
+            trace.set("route", "keyword")
             self.history.append({"role": "assistant", "content": action_json})
             yield action_json
             return
 
         bmo_print("LLM-STREAM", f"No pre-LLM action matched for: '{user_text[:60].lower()}'")
+        trace.set("route", "llm")
 
         # Pre-LLM web search
         search_injected = False
         if needs_web_search(user_text):
+            search_start = time.time()
+            search_result = None
             try:
                 search_result = search_web(user_text)
                 if search_result and search_result not in ("SEARCH_EMPTY", "SEARCH_ERROR") and len(search_result) > 50:
@@ -212,6 +216,12 @@ class Brain:
                     search_injected = True
             except Exception as e:
                 logger.warning(f"Pre-LLM web search failed: {e}")
+            trace.set("search", {
+                "ms": int((time.time() - search_start) * 1000),
+                "used": search_injected,
+                "result": (search_result or "")[:600],
+            })
+            trace.mark("search_done")
 
         full_content = ""
         buffer = ""
@@ -239,6 +249,8 @@ class Brain:
                     if not first_token_logged:
                         ttft = time.time() - stream_start
                         bmo_print("LLM", f"TTFT: {ttft:.2f}s")
+                        trace.set("ttft_ms", int(ttft * 1000))
+                        trace.mark("first_token")
                         first_token_logged = True
 
                     # Replace smart quotes
@@ -250,27 +262,34 @@ class Brain:
                     # If buffer ends with punctuation or newline, yield it
                     if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
                         cleaned = strip_prompt_leakage(buffer)
-                        out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
+                        out_chunk = CHARACTER.normalize_name(cleaned)
+                        # Clear before yielding: breaking out at the sentence
+                        # limit used to leave the last sentence in the buffer,
+                        # and it was then yielded (and spoken) a second time.
+                        buffer = ""
                         if out_chunk.strip():
                             yield out_chunk
                             sentences_yielded += 1
                             if sentences_yielded >= MAX_SENTENCES:
                                 break
-                        buffer = ""
 
             # Yield any remaining buffer
             if buffer.strip():
                 cleaned = strip_prompt_leakage(buffer)
-                out_chunk = re.sub(r'\bBeemo\b', 'BMO', cleaned, flags=re.IGNORECASE)
+                out_chunk = CHARACTER.normalize_name(cleaned)
                 if out_chunk.strip():
                     yield out_chunk
 
             self.history.append({"role": "assistant", "content": full_content})
+            trace.set("llm_raw", full_content)
+            trace.set("llm_ms", int((time.time() - stream_start) * 1000))
+            trace.set("prompt_messages", len(prompt))
 
             # Detect stuck LLM (refusal loops / repetition) — the bad
             # response was already yielded, but we reset history so the
             # NEXT interaction starts clean.
-            self._check_stuck(full_content)
+            if self._check_stuck(full_content):
+                trace.set("history_reset", True)
 
             # Clean injected search context from history
             if search_injected:
@@ -283,7 +302,8 @@ class Brain:
 
         except Exception as e:
             logger.error(f"Brain Exception: {e}", exc_info=True)
-            yield "I'm having trouble right now."
+            trace.set("llm_error", repr(e))
+            yield say("stream_error")
 
     # ── History management ────────────────────────────────────────────────
 
@@ -313,7 +333,7 @@ class Brain:
             vlm_hef = _resolve_hef(VLM_HEF_PATH)
         except FileNotFoundError as e:
             logger.warning(f"VLM HEF not found: {e}")
-            return "BMO's vision model isn't installed yet. Run setup.sh to download it!"
+            return say("vision_missing")
 
         _release_llm()
 
@@ -331,20 +351,20 @@ class Brain:
                 logger.warning("VLM subprocess timed out, killing it")
                 proc.kill()
                 proc.join(timeout=5)
-                return "BMO looked too long and got dizzy! Try again?"
+                return say("vision_timeout")
 
             if proc.exitcode != 0:
                 logger.error(f"VLM subprocess exited with code {proc.exitcode}")
-                return "I tried to look, but my eyes aren't working right now."
+                return say("vision_error")
 
             try:
                 content = result_queue.get_nowait()
             except Exception:
-                return "I tried to look, but my eyes aren't working right now."
+                return say("vision_error")
 
             if content.startswith("ERROR:"):
                 logger.error(f"VLM subprocess error: {content}")
-                return "I tried to look, but my eyes aren't working right now."
+                return say("vision_error")
 
             logger.info(f"VLM response ({len(content)} chars): {content[:120]}...")
             self.history.append({"role": "assistant", "content": content})
@@ -352,4 +372,4 @@ class Brain:
 
         except Exception as e:
             logger.error(f"VLM Exception: {e}", exc_info=True)
-            return "I tried to look, but my eyes aren't working right now."
+            return say("vision_error")

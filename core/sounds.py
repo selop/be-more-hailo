@@ -4,12 +4,12 @@ import os
 import random
 import subprocess
 
-from .config import ALSA_DEVICE, LANGUAGE
+from .config import ALSA_DEVICE, LANGUAGE, SOUNDS_DIR
 from .tts import get_cached_path
 from .log import bmo_print
 
 
-# Voice-line categories get the BMO lo-fi LPF applied.
+# Voice-line categories get the character's lo-fi LPF applied.
 # These are pre-filtered at boot into sounds/.cache/ so play_sound()
 # just plays the cached WAV via aplay — zero runtime overhead.
 VOICE_SOUND_CATEGORIES = {
@@ -35,7 +35,7 @@ class SoundManager:
         self._load()
 
     def _load(self):
-        base = "sounds"
+        base = SOUNDS_DIR
         lang_suffix = f"_{LANGUAGE}" if LANGUAGE != "en" else ""
         for category in self.sounds:
             # Try language-specific directory first (e.g. greeting_sounds_de), fall back to default

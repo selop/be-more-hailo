@@ -1,12 +1,15 @@
 """Pure-function action detection and response cleaning.
 
 No hardware dependencies — all functions operate on strings and return
-strings, dicts, or None.  Trivially testable without an NPU.
+strings, dicts, or None.  Trivially testable without an NPU.  Character
+text (name, fallback lines) comes from the active character pack.
 """
 
 import json
 import re
 import urllib.parse
+
+from .config import CHARACTER, say
 
 
 # ── Keyword lists (single source of truth) ────────────────────────────────
@@ -32,8 +35,11 @@ MUSIC_KEYWORDS = [
     "play a tune", "play me a tune", "play some tunes",
     "can you sing", "will you sing", "do you sing",
     "play your music", "jam out", "dance for me",
-    "sing for bmo", "bmo sing", "play me some music",
+    "play me some music",
 ]
+# Requests that address the character by name ("sing for <name>")
+_name = CHARACTER.name.lower()
+MUSIC_KEYWORDS += [f"sing for {_name}", f"{_name} sing"]
 
 VOICE_EQ_KEYWORDS = [
     "tune your voice", "voice settings", "voice tuner",
@@ -120,10 +126,7 @@ def needs_web_search(user_text: str) -> bool:
 def inject_search_context(user_text: str, search_result: str) -> str:
     """Build the modified user message with ``[LIVE DATA: ...]`` context."""
     clean_result = re.sub(r"^SEARCH RESULTS for '.*?':\n?", "", search_result).strip()
-    return (
-        f"[LIVE DATA: {clean_result}] "
-        f"Using only the above live data, answer in one or two sentences as BMO: {user_text}"
-    )
+    return f"[LIVE DATA: {clean_result}] " + CHARACTER.prompt("live_data", user_text=user_text)
 
 
 # ── Display-image / VLM helpers ──────────────────────────────────────────
@@ -159,7 +162,7 @@ def vlm_question(user_text: str) -> str:
 
 def clean_llm_response(content: str) -> str:
     """Consolidate all post-LLM cleaning: stop tokens, smart quotes,
-    prompt leakage, BMO spelling, and empty-response fallback."""
+    prompt leakage, name spelling, and empty-response fallback."""
     # Strip stop tokens
     for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
         content = content.replace(tok, "")
@@ -169,11 +172,11 @@ def clean_llm_response(content: str) -> str:
     content = content.strip()
     # Strip prompt leakage
     content = strip_prompt_leakage(content)
-    # Fix BMO spelling
-    content = re.sub(r'\bBeemo\b', 'BMO', content, flags=re.IGNORECASE)
+    # Fix the spelling of the character's name
+    content = CHARACTER.normalize_name(content)
     # Fallback
     if not content.strip():
-        content = "BMO is here! How can I help?"
+        content = say("empty_reply")
     return content
 
 

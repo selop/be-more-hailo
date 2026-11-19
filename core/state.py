@@ -9,6 +9,8 @@ import threading
 from enum import Enum
 from dataclasses import dataclass, field
 
+from .config import CHARACTER
+
 
 class Phase(Enum):
     WARMUP = "warmup"
@@ -25,15 +27,14 @@ class Phase(Enum):
 
 
 # Pure emotion expressions — phase stays unchanged when these are set
-VALID_EXPRESSIONS = {
-    "happy", "sad", "angry", "surprised", "sleepy",
-    "dizzy", "cheeky", "heart", "starry_eyed", "confused",
-}
+# (listed in the character pack under [face].expressions)
+VALID_EXPRESSIONS = CHARACTER.expressions
 
 # Persona states are expression-only (phase stays SCREENSAVER)
-PERSONA_EXPRESSIONS = {"football", "detective", "sir_mano", "low_battery", "bee"}
+# (listed in the character pack under [face].personas)
+PERSONA_EXPRESSIONS = CHARACTER.personas
 
-# Every string value that has a faces/ directory — used for animation loading
+# Every string value that has a faces directory — used for animation loading
 ALL_EXPRESSION_NAMES = (
     {p.value for p in Phase}
     | VALID_EXPRESSIONS
@@ -124,44 +125,3 @@ class StateStore:
         """Register hook: ``callback(old_phase, new_phase, msg)``."""
         self._on_phase_change.append(callback)
 
-
-class BotStates:
-    """Backward-compat aliases — prefer ``Phase`` enum + expression strings.
-
-    Kept so that existing code (animation loading, screensaver state lists)
-    can continue referencing ``BotStates.IDLE`` etc. as plain strings.
-    """
-    IDLE = Phase.IDLE.value
-    LISTENING = Phase.LISTENING.value
-    THINKING = Phase.THINKING.value
-    SPEAKING = Phase.SPEAKING.value
-    ERROR = Phase.ERROR.value
-    CAPTURING = Phase.CAPTURING.value
-    WARMUP = Phase.WARMUP.value
-    DISPLAY_IMAGE = Phase.DISPLAY_IMAGE.value
-    SCREENSAVER = Phase.SCREENSAVER.value
-    JAMMING = Phase.JAMMING.value
-    SHHH = Phase.SHHH.value
-
-    # Expressions
-    HAPPY = "happy"
-    SAD = "sad"
-    ANGRY = "angry"
-    SURPRISED = "surprised"
-    SLEEPY = "sleepy"
-    DIZZY = "dizzy"
-    CHEEKY = "cheeky"
-    HEART = "heart"
-    STARRY_EYED = "starry_eyed"
-    CONFUSED = "confused"
-
-    # Personas
-    FOOTBALL = "football"
-    DETECTIVE = "detective"
-    SIR_MANO = "sir_mano"
-    LOW_BATTERY = "low_battery"
-    BEE = "bee"
-
-    ALL = sorted(ALL_EXPRESSION_NAMES)
-
-    VALID_EXPRESSIONS = VALID_EXPRESSIONS

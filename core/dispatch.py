@@ -11,6 +11,9 @@ import re
 import time
 from dataclasses import dataclass, field
 
+from . import trace
+from .config import say
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +69,7 @@ def dispatch_stream(
         if '{"action": "take_photo"}' in chunk:
             bmo_print("AGENT", "take_photo action detected!")
             result.take_photo = True
+            trace.add("actions", {"action": "take_photo"})
             break
 
         # Try to parse JSON action from chunk
@@ -76,6 +80,7 @@ def dispatch_stream(
                 action_data = json.loads(json_match.group(0))
                 action = action_data.get("action")
                 bmo_print("AGENT", f"Parsed action: {action or 'unknown'}")
+                trace.add("actions", action_data)
 
                 if action == "display_image" and action_data.get("image_url"):
                     result.image_url = action_data["image_url"]
@@ -90,7 +95,7 @@ def dispatch_stream(
 
                 elif action == "set_timer" and action_data.get("minutes") is not None:
                     mins = float(action_data["minutes"])
-                    msg = action_data.get("message", "Timer is up!")
+                    msg = action_data.get("message", say("timer_done"))
                     if on_timer:
                         on_timer(mins, msg)
                     chunk = chunk.replace(json_match.group(0), '').strip()
@@ -112,6 +117,7 @@ def dispatch_stream(
 
             except Exception as e:
                 bmo_print("AGENT", f"JSON Parse Error: {e} for: '{json_match.group(0)[:50]}'")
+                trace.add("action_parse_errors", json_match.group(0)[:200])
 
         if chunk.strip():
             result.speak_chunks.append(chunk)
@@ -119,4 +125,6 @@ def dispatch_stream(
     ttlt = time.time() - stream_start
     from .log import bmo_print
     bmo_print("LLM", f"TTLT: {ttlt:.2f}s ({len(result.speak_chunks)} chunks)")
+    trace.set("dispatch_ms", int(ttlt * 1000))
+    trace.mark("reply_ready")
     return result

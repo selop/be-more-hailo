@@ -11,39 +11,14 @@ import re
 import time
 
 from .actions import clean_llm_response
+from .config import CHARACTER, SOUNDS_DIR
 from .log import bmo_print
 from .search import search_web
 
 logger = logging.getLogger(__name__)
 
-SEARCH_TOPICS = [
-    "interesting fun fact of the day",
-    "inspirational quote of the day",
-    "weather forecast today in Brantford, Ontario",
-    "this day in history",
-    "cool science discovery this week",
-    "funny animal fact",
-    "motivational thought for the day",
-    "random wholesome internet story",
-    "video game history fact",
-    "weird food fact",
-    "riddle of the day",
-    "Adventure Time lore or trivia",
-    "today's astronomy picture",
-    "best joke of the day",
-]
-
-FALLBACK_PHRASES = [
-    "I wonder what Finn and Jake are doing right now.",
-    "Does anyone want to play a video game? No? ...Okay.",
-    "La la la la la... BMO is the best!",
-    "Sometimes BMO just likes to hum a little tune.",
-    "Football... is a tough little guy.",
-]
-
-
 def generate_thought(search_result, get_llm):
-    """Generate a BMO musing using the direct NPU LLM API.
+    """Generate an idle musing using the direct NPU LLM API.
 
     Parameters
     ----------
@@ -54,29 +29,9 @@ def generate_thought(search_result, get_llm):
 
     Returns the thought string, or None on failure.
     """
-    thought_prompt = (
-        "You are BMO, a cute little robot. You just learned something interesting from the real world. "
-        "Based on the info below, share what you found OUT LOUD. "
-        "RULES:\n"
-        "1. You MUST include the SPECIFIC name, title, number, date, or fact. NEVER be vague.\n"
-        "2. Talk for 2-3 sentences. First sentence states the specific thing. Second adds your charming opinion.\n"
-        "3. Do NOT ask questions to the user.\n\n"
-        "EXAMPLES of GOOD vs BAD:\n"
-        "BAD: 'I just read about an amazing book!' (too vague, no title)\n"
-        "GOOD: 'BMO just learned about a book called The Hitchhiker's Guide to the Galaxy! It says the answer to everything is 42. BMO wonders what the question is...'\n\n"
-        "BAD: 'I found a cool fact about space!' (too vague, no detail)\n"
-        "GOOD: 'Did you know that Jupiter's Great Red Spot is a storm bigger than Earth? It has been spinning for over 350 years! BMO thinks that is one grumpy planet.'\n\n"
-        "BAD: 'There is a funny joke I heard!' (no punchline)\n"
-        "GOOD: 'Why did the scarecrow win an award? Because he was outstanding in his field! Hehe, BMO loves that one.'\n\n"
-        "If the topic is highly visual (like a nebula, space photo, or cute animal), generate an image using this "
-        "EXACT JSON format anywhere in your response: "
-        '{"action": "display_image", "image_url": "https://image.pollinations.ai/prompt/URL_ENCODED_SUBJECT?width=512&height=512&nologo=true"}. '
-        "Do NOT use JSON unless you are creating an image.\n\n"
-        f"Info: {search_result[:1200]}"
-    )
     messages = [
-        {"role": "system", "content": "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts."},
-        {"role": "user", "content": thought_prompt},
+        {"role": "system", "content": CHARACTER.prompt("idle_system")},
+        {"role": "user", "content": CHARACTER.prompt("idle_thought", info=search_result[:1200])},
     ]
     try:
         llm = get_llm()
@@ -158,9 +113,9 @@ def screensaver_loop(
     import os
 
     if expression_states is None:
-        expression_states = ["heart", "sleepy", "starry_eyed", "dizzy"]
+        expression_states = CHARACTER.idle_expressions
     if persona_states is None:
-        persona_states = ["football", "detective", "sir_mano", "low_battery", "bee"]
+        persona_states = sorted(CHARACTER.personas)
 
     while not stop_event.is_set():
         time.sleep(30)
@@ -194,7 +149,7 @@ def screensaver_loop(
             persona = random.choice(persona_states)
             set_state(persona, "...")
 
-            sound_file = os.path.join("sounds", "personas", f"{persona}.wav")
+            sound_file = os.path.join(SOUNDS_DIR, "personas", f"{persona}.wav")
             if not is_muted_fn() and os.path.exists(sound_file) and alsa_device:
                 try:
                     from .tts import get_cached_path
@@ -220,7 +175,7 @@ def screensaver_loop(
 
                 if is_llm_ready_fn():
                     try:
-                        topic = random.choice(SEARCH_TOPICS)
+                        topic = random.choice(CHARACTER.search_topics)
                         bmo_print("SCREENSAVER", f"Searching for: {topic}")
                         search_result = search_web(topic)
 
@@ -228,7 +183,7 @@ def screensaver_loop(
                             for attempt in range(2):
                                 phrase = generate_thought(search_result, get_llm_fn)
                                 if phrase:
-                                    bmo_print("SCREENSAVER", f"BMO muses: {phrase}")
+                                    bmo_print("SCREENSAVER", f"{CHARACTER.name} muses: {phrase}")
 
                                     phrase, img_url = extract_image_url(phrase)
 
@@ -248,7 +203,7 @@ def screensaver_loop(
                     bmo_print("SCREENSAVER", "LLM server not reachable, skipping thought")
 
                 if not phrase:
-                    phrase = random.choice(FALLBACK_PHRASES)
+                    phrase = random.choice(CHARACTER.fallback_phrases)
                     bmo_print("SCREENSAVER", f"Fallback: {phrase}")
 
                 if get_state() == screensaver_state:

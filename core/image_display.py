@@ -5,6 +5,7 @@ from io import BytesIO
 
 from PIL import Image, ImageOps, ImageTk
 
+from .config import CHARACTER
 from .log import bmo_print
 
 
@@ -23,8 +24,8 @@ def apply_bmo_border(pil_img, width=800, height=480):
     left = (new_w - lcd_w) / 2
     top = (new_h - lcd_h) / 2
     pil_img = pil_img.crop((left, top, left + lcd_w, top + lcd_h))
-    pil_img = ImageOps.expand(pil_img, border=10, fill="#1c201a")
-    pil_img = ImageOps.expand(pil_img, border=20, fill="#38b5a0")
+    pil_img = ImageOps.expand(pil_img, border=10, fill=CHARACTER.theme["frame_inner"])
+    pil_img = ImageOps.expand(pil_img, border=20, fill=CHARACTER.theme["frame_outer"])
     return pil_img
 
 

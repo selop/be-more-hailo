@@ -5,11 +5,15 @@ import re
 import json
 import threading
 import wave
-from .config import PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE, VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER
+from .config import (
+    CHARACTER, PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE,
+    VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER,
+    PRONUNCIATION_FILE, SOUNDS_DIR,
+)
+from .character import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
-PRONUNCIATION_FILE = "pronunciations.json"
 
 # --- Singletons (initialized by init_audio) ---
 _player = None
@@ -30,11 +34,7 @@ def load_pronunciations() -> dict:
             logger.error(f"Error loading pronunciations: {e}")
 
     # Default dictionary if file doesn't exist or fails to load
-    default_dict = {
-        "cheesy": "cheezy",
-        "poutine": "poo-teen",
-        "bmo": "beemo"
-    }
+    default_dict = CHARACTER.default_pronunciations
     save_pronunciations(default_dict)
     return default_dict
 
@@ -232,7 +232,7 @@ def play_wav_file(filepath: str, apply_voice_lpf: bool = False):
 # sounds/.cache/ as 22050Hz mono int16 WAVs with LPF applied.
 # =========================================================================
 
-_cache_dir = os.path.join("sounds", ".cache")
+_cache_dir = os.path.join(SOUNDS_DIR, ".cache")
 
 
 def precache_voice_sounds(file_list: list[str]):
@@ -280,7 +280,9 @@ def invalidate_cache():
 def _cached_path(filepath: str) -> str:
     """Deterministic cache filename for a source WAV."""
     import hashlib
-    h = hashlib.md5(filepath.encode()).hexdigest()[:12]
+    # Hash the project-relative path so the key does not depend on the cwd
+    rel = os.path.relpath(filepath, PROJECT_ROOT)
+    h = hashlib.md5(rel.encode()).hexdigest()[:12]
     basename = os.path.splitext(os.path.basename(filepath))[0]
     return os.path.join(_cache_dir, f"{basename}_{h}.wav")
 
@@ -460,63 +462,3 @@ def get_player() -> AudioPlayer:
 def get_synthesizer() -> PiperSynthesizer:
     """Get the singleton PiperSynthesizer instance."""
     return _synthesizer
-
-
-# =========================================================================
-# Public API (used by web_app.py and agent_hailo.py)
-# =========================================================================
-
-def play_audio_on_hardware(text: str):
-    """Plays audio directly out of the Pi's speakers using Piper + persistent stream."""
-    try:
-        clean_text = clean_text_for_speech(text)
-        if not clean_text or not any(c.isalnum() for c in clean_text):
-            return
-
-        logger.info(f"Playing audio on hardware: {clean_text[:30]}...")
-
-        synth = get_synthesizer()
-        player = get_player()
-
-        if synth and player:
-            pcm = synth.synthesize(clean_text)
-            if pcm:
-                player.play(pcm)
-        else:
-            # Fallback: original shell pipeline (init_audio not called, e.g. web_app)
-            safe_text = clean_text.replace("'", "'\\''")
-            piper_cmd = f"echo '{safe_text}' | {PIPER_CMD} --model {PIPER_MODEL} --output_raw | aplay -D {ALSA_DEVICE} -r 22050 -f S16_LE -t raw"
-            subprocess.run(piper_cmd, shell=True, check=True)
-    except Exception as e:
-        logger.error(f"Hardware TTS Error: {e}")
-
-def generate_audio_file(text: str, filename: str) -> str:
-    """Generates a WAV file using Piper for the browser to play."""
-    try:
-        clean_text = clean_text_for_speech(text)
-        if not clean_text or not any(c.isalnum() for c in clean_text):
-            return None
-
-        logger.info(f"Generating audio file: {filename}")
-        filepath = os.path.join("static", "audio", filename)
-
-        synth = get_synthesizer()
-        if synth:
-            pcm = synth.synthesize(clean_text)
-            if pcm:
-                with wave.open(filepath, 'wb') as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(22050)
-                    wf.writeframes(pcm)
-                return f"/static/audio/{filename}"
-            return None
-
-        # Fallback: original subprocess
-        safe_text = clean_text.replace("'", "'\\''")
-        piper_cmd = f"echo '{safe_text}' | {PIPER_CMD} --model {PIPER_MODEL} --output_file {filepath}"
-        subprocess.run(piper_cmd, shell=True, check=True)
-        return f"/static/audio/{filename}"
-    except Exception as e:
-        logger.error(f"File TTS Error: {e}")
-        return None

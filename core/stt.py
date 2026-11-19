@@ -4,7 +4,8 @@ import os
 import re
 import wave
 import numpy as np
-from .config import WHISPER_CMD, WHISPER_MODEL, WHISPER_HEF_PATH, LANGUAGE
+from . import trace
+from .config import CHARACTER, WHISPER_CMD, WHISPER_MODEL, WHISPER_HEF_PATH, LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +103,12 @@ def _is_16khz_mono_wav(filepath: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 def _clean_transcription(text: str) -> str:
-    """Clean up raw STT output: remove timestamps, fix BMO spelling, filter hallucinations."""
+    """Clean up raw STT output: remove timestamps, fix the name's spelling, filter hallucinations."""
     # Remove timestamps like [00:00:00.000 --> 00:00:02.000] or [BLANK_AUDIO]
     text = re.sub(r'\[.*?\]', '', text).strip()
 
-    # Fix BMO spelling
-    text = re.sub(r'\b[Bb]emo\b', 'BMO', text)
-    text = re.sub(r'\b[Bb]eemo\b', 'BMO', text)
+    # Fix misheard spellings of the character's name
+    text = CHARACTER.normalize_name(text)
 
     # Filter hallucinations
     lowered = text.lower()
@@ -204,8 +204,12 @@ def transcribe_audio(audio_filepath: str) -> str:
 
     if _stt_instance is not None:
         try:
-            return _transcribe_npu(audio_filepath)
+            text = _transcribe_npu(audio_filepath)
+            trace.set("stt_backend", "npu")
+            return text
         except Exception as e:
             logger.warning(f"NPU STT failed, falling back to CPU: {e}")
+            trace.set("stt_npu_error", repr(e))
 
+    trace.set("stt_backend", "cpu")
     return _transcribe_cpu(audio_filepath)

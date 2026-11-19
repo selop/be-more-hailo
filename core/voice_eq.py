@@ -52,7 +52,8 @@ def voice_eq_save(enabled: bool, cutoff: int, order: int):
 # ── Overlay widget ───────────────────────────────────────────────────────
 
 class VoiceEQOverlay:
-    """Full-screen voice EQ overlay with CRT-green Adventure Time aesthetic."""
+    """Full-screen voice EQ overlay. The palette below is the default; a
+    character pack overrides it through ``[theme.tuner]``."""
 
     SCREEN_W, SCREEN_H = 800, 480
 
@@ -150,7 +151,7 @@ class VoiceEQOverlay:
 
         # Title
         c.create_text(
-            self.SCREEN_W // 2, 32, text="BMO VOICE TUNER",
+            self.SCREEN_W // 2, 32, text=config.say("eq_title"),
             font=('Courier New', 18, 'bold'), fill=self.LINE_CLR)
 
         # Frequency response curve
@@ -442,7 +443,7 @@ class VoiceEQOverlay:
                 if not synth or not player:
                     return
 
-                pcm = synth.synthesize_raw("Hello! BMO is tuning their voice!")
+                pcm = synth.synthesize_raw(config.say("eq_test"))
                 if not pcm or not self._enabled:
                     if pcm:
                         player.resume()
@@ -471,3 +472,9 @@ class VoiceEQOverlay:
 
     def _cancel(self):
         self.hide()
+
+
+# Apply the active character's tuner palette over the defaults above.
+for _key, _value in config.CHARACTER.theme.get("tuner", {}).items():
+    if hasattr(VoiceEQOverlay, _key):
+        setattr(VoiceEQOverlay, _key, _value)

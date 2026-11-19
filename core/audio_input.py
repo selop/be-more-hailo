@@ -11,13 +11,19 @@ import logging
 import numpy as np
 import sounddevice as sd
 
+from . import trace
 from .config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_THRESHOLD, SILENCE_THRESHOLD
 from .log import bmo_print
 
 logger = logging.getLogger(__name__)
 
 
-def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_suppress_fn=None):
+# Score of the most recent wake-word detection (read by the turn trace)
+last_wake_score = None
+
+
+def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_suppress_fn=None,
+                      interrupt_fn=None):
     """Block until the wake word is heard, returning ``True``.
 
     Parameters
@@ -33,6 +39,10 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
     extra_suppress_fn : callable or None
         Additional suppression check (e.g. post-speech cooldown).
         Returns True to suppress.
+    interrupt_fn : callable or None
+        Checked on every chunk; when it returns True the wait ends and
+        ``True`` is returned although no wake word was heard (used to
+        start an injected test turn).
     """
     CHUNK = 1280
     capture_rate = MIC_SAMPLE_RATE
@@ -45,6 +55,10 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
                 data, _ = stream.read(CHUNK * downsample_factor)
                 audio_16k = data[::downsample_factor].flatten()
 
+                if interrupt_fn and interrupt_fn():
+                    oww.reset()
+                    return True
+
                 if get_state() in suppressed_states or (extra_suppress_fn and extra_suppress_fn()):
                     oww.reset()
                     continue
@@ -54,6 +68,8 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
                 for key in oww.prediction_buffer.keys():
                     if oww.prediction_buffer[key][-1] > WAKE_WORD_THRESHOLD:
                         bmo_print("WAKE", f"Detected: {key}")
+                        global last_wake_score
+                        last_wake_score = round(float(oww.prediction_buffer[key][-1]), 3)
                         oww.reset()
                         return True
     except Exception as e:
@@ -101,13 +117,17 @@ def record_until_silence(
     silent_chunks = 0
     has_spoken = False
     max_vol_seen = 0.0
+    block_frames = 0        # frames per callback, as delivered by the driver
+    n_blocks = 0
     ignore_until = time.time() + ignore_sec
 
     def callback(indata, frames_count, time_info, status):
-        nonlocal silent_chunks, has_spoken, max_vol_seen
+        nonlocal silent_chunks, has_spoken, max_vol_seen, block_frames, n_blocks
 
         if time.time() < ignore_until:
             return
+        block_frames = frames_count
+        n_blocks += 1
         vol = np.linalg.norm(indata) * 10
         if meter_cb is not None:
             meter_cb(vol)
@@ -145,6 +165,15 @@ def record_until_silence(
     except Exception as e:
         bmo_print("STT", f"Recording Error: {e}")
         return None
+
+    trace.set("mic", {
+        "block_frames": block_frames,
+        "blocks": n_blocks,
+        "seconds": round(n_blocks * block_frames / MIC_SAMPLE_RATE, 2),
+        "max_volume": round(float(max_vol_seen)),
+        "silence_threshold": SILENCE_THRESHOLD,
+        "spoke": has_spoken,
+    })
 
     if ignore_sec > 0:
         # Give ALSA/PortAudio time to fully close the stream context at OS level

@@ -7,14 +7,10 @@ ollama
 ddgs
 
 Pillow
-fastapi
-python-multipart
-uvicorn
-jinja2
 requests
 librosa
 soundfile
 google-generativeai
 python-dotenv
-psutil
 opencv-python
+tomli; python_version < "3.11"

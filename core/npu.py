@@ -7,10 +7,11 @@ Isolates all Hailo hardware interaction from conversation logic so that
 import base64
 import logging
 import os
+import time
 
 import numpy as np
 
-from .config import LLM_HEF_PATH, VLM_HEF_PATH, get_system_prompt
+from .config import CHARACTER, LLM_HEF_PATH, VLM_HEF_PATH, get_system_prompt
 from .actions import vlm_question, clean_llm_response
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,25 @@ def _resolve_hef(hef_path: str) -> str:
     if not os.path.exists(hef_path):
         raise FileNotFoundError(f"HEF not found at {hef_path}")
     return hef_path
+
+
+def _warm_file_cache(path: str):
+    """Read *path* once so it sits in the page cache.
+
+    On a cold boot from slow storage (SD card, about 10 MB/s) loading the
+    LLM HEF inside HailoRT ran for minutes and then failed with
+    ``HailoRTStatusException: 72``; a second attempt with the file cached
+    loaded in seconds. Reading the file first is nearly free when it is
+    already cached.
+    """
+    try:
+        t0 = time.time()
+        with open(path, "rb", buffering=0) as f:
+            while f.read(8 << 20):
+                pass
+        logger.info(f"HEF read into page cache in {time.time() - t0:.1f}s")
+    except OSError as e:
+        logger.warning(f"Could not pre-read {path}: {e}")
 
 
 def _get_vdevice():
@@ -55,6 +75,7 @@ def _get_llm():
     from hailo_platform.genai import LLM
 
     hef = _resolve_hef(LLM_HEF_PATH)
+    _warm_file_cache(hef)
     vdevice = _get_vdevice()
 
     logger.info(f"Initialising Hailo LLM from {hef} ...")
@@ -169,7 +190,7 @@ def _vlm_worker(image_b64: str, user_text: str, vlm_hef: str, result_queue):
 
         prompt = [
             {"role": "system", "content": [
-                {"type": "text", "text": "You are BMO, a helpful robot assistant. Describe what you see concisely and conversationally in English."}
+                {"type": "text", "text": CHARACTER.prompt("vision")}
             ]},
             {"role": "user", "content": [
                 {"type": "image"},
