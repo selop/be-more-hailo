@@ -1,0 +1,8 @@
+# What the hardware-free tests and the laptop tools import.
+# The Pi uses requirements.txt; this file is for a development machine.
+numpy
+scipy
+sounddevice
+Pillow
+python-dotenv
+ddgs

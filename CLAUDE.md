@@ -6,6 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Be More Agent — Hailo-10H Edition** is a fully on-device conversational AI agent (BMO) for Raspberry Pi 5 with Hailo-10H NPU. BMO is a genderless robot character (Adventure Time inspired) with animated expressions, voice interaction, vision, games, timers, and music. Fork of `@brenpoly/be-more-agent`.
 
+## Developer Tasks
+
+`make help` lists everything. The common ones:
+
+```bash
+make check        # compile and run the hardware-free tests
+make ship         # check, deploy to the Pi, run the tests there, restart the agent
+make deploy       # copy the code only (make restart loads it)
+make monitor      # live dashboard: temperature, fan, memory, microphone, last turn
+make say TEXT="what time is it"   # silent test turn on the Pi, prints its trace
+make screenshot   # capture the Pi's display and open it
+make face         # open the face page locally; make face-demo feeds it fake events
+```
+
+The device defaults to `selop@raspi`; use `BMO_HOST=selop@bmo` for the SSD install. `make setup` creates `.venv-dev` from `requirements-dev.txt` for a development machine.
+
 ## Running the Project
 
 ```bash

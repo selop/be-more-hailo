@@ -64,3 +64,6 @@ logs/
 
 # Skill evaluation runs
 .claude/skills/*-workspace/
+
+# Development virtualenv (make setup)
+.venv-dev/

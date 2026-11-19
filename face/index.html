@@ -18,6 +18,7 @@
     left/right arrows step through the faces, A answering, I idle,
     M microphone, C CRT on/off, H hide controls.
   Still frames: ?freeze=1&pose=happy&open=45&width=62&blink=0&fx=0&t=3
+  Frame rate: 30 per second by default; ?fps=60 for the display's full rate.
 -->
 <style>
   :root { --frame: #080a09; --ink: #bdffcb; --dim: #5d7a63; --accent: #38b5a0; }
@@ -871,8 +872,15 @@ canvas.addEventListener('pointerup', () => {
 const frozen = params.has('freeze');
 let last = performance.now(), frameCount = 0, fpsSince = last, clock = Number(params.get('t') || 0);
 
+// Frames per second. 30 looks the same on this face and roughly halves the
+// GPU work, which keeps the Pi cooler and its fan quieter. ?fps=60 overrides.
+const FPS_CAP = Math.max(Number(params.get('fps')) || 30, 1);
+
 function frame(now) {
-  const dt = frozen ? 1 / 60 : Math.min((now - last) / 1000, 0.05);
+  requestAnimationFrame(frame);
+  // The display refreshes at 60 Hz; skip refreshes until a frame is due
+  if (!frozen && now - last < 1000 / FPS_CAP - 2) return;
+  const dt = frozen ? 1 / 60 : Math.min((now - last) / 1000, 0.1);
   last = now; if (!frozen) clock += dt;
   const t = clock;
 
@@ -943,7 +951,6 @@ function frame(now) {
 
   frameCount++;
   if (now - fpsSince > 1000) { $('fps').textContent = Math.round(frameCount * 1000 / (now - fpsSince)) + ' fps'; frameCount = 0; fpsSince = now; }
-  requestAnimationFrame(frame);
 }
 
 // ── Controls (demo and tinkering; hidden in kiosk mode) ──────────────────
