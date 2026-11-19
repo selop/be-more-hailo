@@ -61,6 +61,10 @@ class TurnUI:
     def show_image(self, image_url: str):
         """Download and display a generated image."""
 
+    def speech_started(self, pcm: bytes, sample_rate: int):
+        """Called just before a sentence is played, with its audio (int16
+        mono PCM), so a display can move the mouth in time with it."""
+
     def boot_failed(self, error: Exception):
         """Called when audio or model loading raised during boot. The phase
         is already ``ERROR``. A long-running shell should exit with a
@@ -164,6 +168,7 @@ class Conversation:
             })
 
             if not self.store.muted:
+                self.ui.speech_started(pcm, 22050)
                 player.resume()
                 player.play(pcm)
             else:

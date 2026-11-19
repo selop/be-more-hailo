@@ -10,7 +10,7 @@ import time
 from PIL import Image, ImageTk
 
 from .config import t
-from .image_display import apply_bmo_border
+from .image_display import apply_bmo_border, notify_image
 from .npu import _release_llm, reload_after_vlm
 from .log import bmo_print
 
@@ -106,6 +106,7 @@ class CameraHandler:
                 tk_img = ImageTk.PhotoImage(photo_img)
                 self.set_display_image(tk_img)
                 self.label.config(image=tk_img)
+                notify_image(photo_img)
             except Exception as e:
                 bmo_print("CAMERA", f"Photo display error: {e}")
 

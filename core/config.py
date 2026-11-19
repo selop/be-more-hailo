@@ -109,6 +109,9 @@ WAKE_WORD_THRESHOLD = CHARACTER.wake_threshold if CHARACTER.wake_threshold is no
 SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
 
 # UI Settings
+# Which face to show: "web" = the live three.js face in a local browser on top
+# of the window, "tk" = the PNG frames only.
+FACE_DISPLAY = os.environ.get("FACE_DISPLAY", "web")
 MIC_METER_ENABLED = True  # Show mic gain meter overlay during listening
 
 def t(key):

@@ -9,6 +9,19 @@ from .config import CHARACTER
 from .log import bmo_print
 
 
+# Called with the framed PIL image whenever a picture goes on screen, so other
+# displays (the live face) can show it too.
+image_listeners = []
+
+
+def notify_image(pil_img):
+    for listener in list(image_listeners):
+        try:
+            listener(pil_img)
+        except Exception as e:  # noqa: BLE001
+            bmo_print("IMAGE", f"Image listener failed: {e!r}")
+
+
 def apply_bmo_border(pil_img, width=800, height=480):
     """Resize, crop, and add BMO-style border to an image for LCD display."""
     lcd_w, lcd_h = width - 60, height - 60
@@ -64,6 +77,7 @@ def download_and_display(image_url, background_label, master, set_display_image)
                 tk_img = ImageTk.PhotoImage(pil_img)
                 set_display_image(tk_img)
                 background_label.config(image=tk_img)
+                notify_image(img)
                 bmo_print("IMAGE", "Displayed on screen")
             except Exception as e:
                 bmo_print("IMAGE", f"Tkinter display error: {e}")

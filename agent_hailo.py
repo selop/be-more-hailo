@@ -3,6 +3,7 @@
 #  Simplified for Pi 5 + Hailo-10H + USB Mic
 # =========================================================================
 
+import atexit
 import tkinter as tk
 import threading
 import time
@@ -13,9 +14,11 @@ import os
 # Core modules
 from core.llm import is_llm_ready, _get_llm
 from core.tts import get_player
-from core.config import CHARACTER, ALSA_DEVICE
+from core.config import CHARACTER, ALSA_DEVICE, FACE_DISPLAY
 from core.turn import Conversation, TurnUI
 from core.control import ControlServer
+from core.display_server import DisplayServer, StateMirror, speech_envelope
+from core import image_display
 from core.screensaver import screensaver_loop
 from core.meter import MicMeter
 from core.bubble import ThoughtBubble
@@ -194,6 +197,13 @@ class BotGUI(TurnUI):
             stop_thinking_audio=self.conversation.stop_thinking_audio,
         )
 
+        # --- Live face: a three.js page in a local browser on top of this window ---
+        self.status_text = "Initializing..."
+        self.display = None
+        self._meter_sent = 0.0
+        if FACE_DISPLAY == "web":
+            self._start_live_face()
+
         # Start the conversation thread (boot + turn loop)
         threading.Thread(target=self.conversation.run, daemon=True).start()
 
@@ -207,6 +217,46 @@ class BotGUI(TurnUI):
             args=(self.stop_event, self._on_hot_reload),
             daemon=True,
         ).start()
+
+    # ------------------------------------------------------------------
+    # Live face (core/display_server.py). It mirrors what this window
+    # shows; if it cannot start, the window itself remains the display.
+    # ------------------------------------------------------------------
+
+    def _start_live_face(self):
+        display = DisplayServer(on_action=self._on_face_action)
+        if not display.start():
+            return
+        self.display = display
+        atexit.register(display.stop)
+        StateMirror(display, self.store, lambda: self.status_text, self.conversation.active_timers).start()
+        image_display.image_listeners.append(display.show_image)
+
+        # Mirror the speech bubble
+        show, hide = self.bubble.show, self.bubble.hide
+
+        def show_bubble(text, duration_ms=None):
+            show(text, duration_ms)
+            if text and len(text.strip()) >= 2:
+                display.publish("bubble", text=text.strip(), hold_ms=duration_ms or self.bubble.HOLD_MS)
+
+        def hide_bubble():
+            hide()
+            display.publish("bubble", text="", hold_ms=0)
+
+        self.bubble.show, self.bubble.hide = show_bubble, hide_bubble
+        display.open_browser()
+
+    def _on_face_action(self, action):
+        """A touch on the live face (it covers this window, so it gets them)."""
+        kind = action.get("type")
+        bmo_print("FACE", f"Touch: {kind}")
+        if kind == "tap":
+            self.master.after(0, self.mute_bmo)
+        elif kind == "shutdown":
+            self.master.after(0, self._shutdown)
+        # "long_press" opened the voice tuner on the old display; the live
+        # face has no tuner yet.
 
     # ------------------------------------------------------------------
     # Animation loop bridge
@@ -224,7 +274,7 @@ class BotGUI(TurnUI):
         self.anim.current_frame = 0
         bmo_print("STATE", f"{new_phase.value.upper()}: {msg}")
         if msg:
-            self.status_label.config(text=msg)
+            self.set_status(msg)
         if new_phase in (Phase.LISTENING, Phase.CAPTURING):
             # A new turn has started: a picture from an earlier turn goes away
             self._clear_image()
@@ -247,10 +297,12 @@ class BotGUI(TurnUI):
             # Expression-only (e.g. "happy", "football") — face changes, phase stays
             self.store.set_expression(state)
             if msg:
-                self.status_label.config(text=msg)
+                self.set_status(msg)
 
     def exit_fullscreen(self, event=None):
         self.stop_event.set()
+        if self.display is not None:
+            self.display.close_browser()
         self.master.quit()
 
     # ------------------------------------------------------------------
@@ -287,7 +339,7 @@ class BotGUI(TurnUI):
             def revert_state():
                 if self.store.expression == "happy" and self.store.phase == Phase.IDLE:
                     self.store.set_expression("idle")
-                    self.status_label.config(text="Ready...")
+                    self.set_status("Ready...")
             self.master.after(2000, revert_state)
 
     def _on_press(self, event=None):
@@ -313,6 +365,8 @@ class BotGUI(TurnUI):
         bmo_print("SHUTDOWN", "Long press shutdown triggered")
         self.store.set_phase(Phase.ERROR, msg="Shutting down...")
         self.stop_event.set()
+        if self.display is not None:
+            self.display.close_browser()
         self.master.after(500, self.master.quit)
 
     def _open_eq(self):
@@ -334,6 +388,7 @@ class BotGUI(TurnUI):
     # ------------------------------------------------------------------
 
     def set_status(self, text):
+        self.status_text = text
         self.status_label.config(text=text)
 
     def show_user_prompt(self, text):
@@ -341,6 +396,15 @@ class BotGUI(TurnUI):
 
     def meter_feed(self, volume):
         self.meter.feed(volume)
+        if self.display is not None:
+            now = time.time()
+            if now - self._meter_sent >= 0.05:
+                self._meter_sent = now
+                self.display.publish("meter", level=round(min(volume / MicMeter.VOL_MAX, 1.0), 3))
+
+    def speech_started(self, pcm, sample_rate):
+        if self.display is not None:
+            self.display.publish("speak", envelope=speech_envelope(pcm, sample_rate), step_ms=20)
 
     def set_boot_frame(self, frame):
         self.anim.current_frame = frame

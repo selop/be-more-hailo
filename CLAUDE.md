@@ -24,7 +24,7 @@ sudo systemctl start bmo-gui
 sudo journalctl -u bmo-gui -f  # view logs
 ```
 
-Tests that need no hardware live in `tests/` and run with `pytest tests/` or directly (`python tests/test_character.py`, `python tests/test_turn.py`, `python tests/test_brain.py`, `python tests/test_timers.py`).
+Tests that need no hardware live in `tests/` and run with `pytest tests/` or directly (`python tests/test_character.py`, `python tests/test_turn.py`, `python tests/test_brain.py`, `python tests/test_timers.py`, `python tests/test_display.py`).
 
 To test on the device without speaking, use `scripts/bmo-remote.sh` (see `docs/observability.md`): `say "..." --quiet` runs a real turn from text and prints its trace, `turns`/`stats` read past turns, `screenshot` captures the display. Verify a change there before calling it done. Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually on the Pi.
 
@@ -41,6 +41,7 @@ agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──�
                          ├── turn.py         # Conversation: turn loop, speaking, timers, music (no Tkinter)
                          ├── trace.py        # Per-turn traces and events written to logs/ (see docs/observability.md)
                          ├── control.py      # Local control socket: inject test turns, query status
+                         ├── display_server.py # Serves the live face page and streams engine events to it
                          ├── state.py        # Centralized StateStore: Phase enum + expression (see docs/state-store.md)
                          ├── config.py       # Paths, models, ALSA devices; exposes the active CHARACTER
                          ├── npu.py          # VDevice + LLM + VLM lifecycle (hardware layer)
@@ -100,6 +101,18 @@ When adding a new expression with animation frames:
 - In engine code, read character data through `core.config.CHARACTER` (`.name`, `.prompt(key, ...)`, `.theme`, `.normalize_name()`), and spoken lines through `core.config.t(key)` (string or list) or `core.config.say(key)` (always one string). Never write a character's name or lines into engine code.
 - A new spoken line needs a key in `[lines.en]` and in `REQUIRED_LINES` in `core/character.py`.
 - A new character also needs its own faces, a wake-word model and a Piper voice.
+
+### Live Face
+
+The face is a web page (`face/index.html`, three.js, CRT tube shader) shown by Chromium in kiosk mode on top of the Tkinter window. `core/display_server.py` serves it on 127.0.0.1:8765 and streams engine events to it (`/events`); touches come back through `POST /action`.
+
+- Six faces are drawn live in the shader (`POSES` in `face/index.html`): idle, speaking, happy, sad, angry, surprised. Every other face is shown from its PNG frames inside the same tube until it is ported.
+- The speech bubble, status line, mic meter, timer clock, mute label and pictures are painted on a 2D canvas that the shader lays over the face, so they sit inside the tube too.
+- The mouth follows the loudness of the audio being played (`speak` event, built by `speech_envelope()`).
+- The Tkinter window still runs underneath and remains the display if the page cannot start. `FACE_DISPLAY=tk` turns the live face off.
+- To port a face: add an entry to `POSES` (eye and mouth shape weights plus motion flags); add a shape to the shader only if the existing ones cannot express it.
+- Tinker on a laptop with `python scripts/face_demo.py` (fake events) or by opening `face/index.html` as a file (demo buttons). Still frames: `?freeze=1&pose=happy&fx=0`.
+- The voice tuner has no live-face version yet; a long press does nothing there.
 
 ### Observability
 
