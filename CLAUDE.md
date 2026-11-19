@@ -16,30 +16,33 @@ source venv/bin/activate
 ./start_agent.sh
 # or directly: python agent_hailo.py
 
-# Web interface (FastAPI)
-./start_web.sh
-# or directly: uvicorn web_app:app --host 0.0.0.0 --port 8080
-
 # CLI chat (minimal, for quick testing)
 python cli_chat.py
 
 # Systemd services (production)
-sudo systemctl start bmo-gui   # or bmo-web
-sudo journalctl -u bmo-web -f  # view logs
+sudo systemctl start bmo-gui
+sudo journalctl -u bmo-gui -f  # view logs
 ```
 
-There is no formal test suite (no pytest). Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually.
+Tests that need no hardware live in `tests/` and run with `pytest tests/` or directly (`python tests/test_character.py`, `python tests/test_turn.py`, `python tests/test_brain.py`).
+
+To test on the device without speaking, use `scripts/bmo-remote.sh` (see `docs/observability.md`): `say "..." --quiet` runs a real turn from text and prints its trace, `turns`/`stats` read past turns, `screenshot` captures the display. Verify a change there before calling it done. Benchmark files (`scripts/benchmark_llm.py`, `scripts/benchmark_stt.py`) are standalone verification scripts run manually on the Pi.
 
 ## Architecture
 
-### Dual Interface, Shared Core
+### Engine and Character Pack
 
 ```
-agent_hailo.py  ─┐
-                  ├──► core/  ──► hailo_platform.genai (NPU) ──► Hailo-10H
-web_app.py      ─┘      │
+characters/<id>/character.toml  ──► core/character.py  (who the assistant is)
+
+agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──► Hailo-10H
+                         │
+                         ├── character.py    # Loads the character pack (name, prompts, lines, theme, voice)
+                         ├── turn.py         # Conversation: turn loop, speaking, timers, music (no Tkinter)
+                         ├── trace.py        # Per-turn traces and events written to logs/ (see docs/observability.md)
+                         ├── control.py      # Local control socket: inject test turns, query status
                          ├── state.py        # Centralized StateStore: Phase enum + expression (see docs/state-store.md)
-                         ├── config.py       # All paths, models, system prompt, ALSA devices
+                         ├── config.py       # Paths, models, ALSA devices; exposes the active CHARACTER
                          ├── npu.py          # VDevice + LLM + VLM lifecycle (hardware layer)
                          ├── actions.py      # Keyword matching, response cleaning (pure functions, no HW)
                          ├── llm.py          # Brain class: conversation history + inference orchestration
@@ -51,9 +54,9 @@ web_app.py      ─┘      │
                          └── search.py       # DuckDuckGo web search integration
 ```
 
-- **`agent_hailo.py`** — Tkinter fullscreen GUI with 22+ animated expression states, sound/music playback, main conversation loop
-- **`web_app.py`** — FastAPI server with WebSocket audio streaming, browser-based UI in `templates/index.html`
-- **`core/`** — Shared modules used by both interfaces. `npu.py` owns all Hailo hardware interaction, `actions.py` and `dispatch.py` are pure-function modules testable without NPU hardware
+- **`agent_hailo.py`** — Tkinter shell: window, touch input, face animation, overlays. Implements `core.turn.TurnUI`; the conversation loop itself is `core.turn.Conversation`
+- **`characters/bmo/`** — BMO's character pack. The engine (`core/`, `agent_hailo.py`, `cli_chat.py`) must stay character-neutral: no names, lines or prompts as string literals. `tests/test_character.py` enforces this
+- **`core/`** — Shared modules used by the GUI and `cli_chat.py`. `npu.py` owns all Hailo hardware interaction, `actions.py` and `dispatch.py` are pure-function modules testable without NPU hardware
 
 ### AI/ML Stack
 
@@ -73,6 +76,7 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 - **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes
 - **Sentence-streaming TTS**: Response is split sentence-by-sentence; TTS plays each sentence as LLM continues generating
 - **System prompt caching**: `llm.save_context()` / `llm.load_context()` caches system prompt KV state at startup — not re-processed every turn
+- **Turn loop outside the GUI**: `core.turn.Conversation` runs boot and the turn loop on a worker thread and reports to the display through the `TurnUI` callbacks; it owns `speak()`, timers and music
 - **Wake word suppression**: Wake word detection is suppressed during `Phase.SPEAKING` and `Phase.JAMMING` to prevent BMO's own audio from triggering false detections
 - **Pronunciation system**: User corrects pronunciation → LLM appends `!PRONOUNCE: word=phonetic` → saved to `pronunciations.json` → Piper substitutions
 - **VLM subprocess swap**: Main process releases STT+LLM+VDevice → forks child → child loads VLM → inference → child exits → parent reloads LLM+STT+system prompt cache
@@ -83,9 +87,21 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 When adding a new expression with animation frames:
 1. Create the generator function in `generate_faces.py` (e.g. `gen_mystate()`)
 2. Add it to the `if __name__ == "__main__"` block
-3. Add the expression string to the appropriate set in `core/state.py`: `VALID_EXPRESSIONS` (emotion faces) or `PERSONA_EXPRESSIONS` (persona gags). This auto-includes it in `ALL_EXPRESSION_NAMES` and `BotStates.ALL` for animation loading.
+3. Add the expression name to `characters/bmo/character.toml` under `[face]`: `expressions` (emotion faces the LLM may request) or `personas` (screensaver gags). `core/state.py` builds `VALID_EXPRESSIONS`, `PERSONA_EXPRESSIONS` and `ALL_EXPRESSION_NAMES` from the pack.
 4. Run `python generate_faces.py` on the Pi to create the PNG frames
-5. New sound categories also need to be registered in `self.sounds` dict in `load_sounds()`
+5. New sound categories also need to be registered in `self.sounds` dict in `SoundManager.__init__()` (`core/sounds.py`)
+
+### Changing or Adding a Character
+
+- All character text lives in `characters/<id>/character.toml`: name, misheard spellings, prompts (with `${placeholder}` variables), spoken lines per language, expressions, theme colours, voice model and filter, idle topics, and `[assets]` paths.
+- Select a pack with the `CHARACTER` environment variable (default `bmo`).
+- In engine code, read character data through `core.config.CHARACTER` (`.name`, `.prompt(key, ...)`, `.theme`, `.normalize_name()`), and spoken lines through `core.config.t(key)` (string or list) or `core.config.say(key)` (always one string). Never write a character's name or lines into engine code.
+- A new spoken line needs a key in `[lines.en]` and in `REQUIRED_LINES` in `core/character.py`.
+- A new character also needs its own faces, a wake-word model and a Piper voice.
+
+### Observability
+
+Every turn is traced to `logs/turns.jsonl` on the device (transcript, route, model output, actions, spoken sentences, timings, phases, mic statistics). When adding behaviour to a turn, record what happened with `trace.set()` / `trace.add()` / `trace.mark()` from `core/trace.py` so it can be checked remotely. See `docs/observability.md`.
 
 ### Asset Directories
 
@@ -105,7 +121,8 @@ All configuration lives in `core/config.py`. Key settings:
 - `MIC_DEVICE_INDEX` — sounddevice input index
 - `WAKE_WORD_THRESHOLD` — Wake word sensitivity (default 0.35)
 - `SILENCE_THRESHOLD` — Mic silence detection level (override with `SILENCE_THRESHOLD` env var)
-- `get_system_prompt()` — BMO's personality, behavior rules, and action JSON formats
+- `get_system_prompt()` — fills the character pack's `prompts.system` with time, date and language rule
+- `CHARACTER` — the active character pack; set the `CHARACTER` env var to choose one (default `bmo`)
 
 Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `BMO_LANGUAGE` (en/de).
 
@@ -119,7 +136,7 @@ rsync -avz --relative core/config.py core/tts.py agent_hailo.py selop@raspi:~/Gi
 ## Important Conventions
 
 - BMO is genderless — use they/them, never he/she
-- BMO's personality is defined in `get_system_prompt()` in `core/config.py` — keep responses warm, short (2-4 sentences), with occasional third-person self-reference
+- BMO's personality is defined in `prompts.system` in `characters/bmo/character.toml` — keep responses warm, short (2-4 sentences), with occasional third-person self-reference
 - LLM must respond only in English regardless of input language
 - External APIs used: DuckDuckGo (no key), Pollinations.ai (image gen, no key), optional Gemini (key required)
 - Hardware target is Raspberry Pi 5 + Hailo-10H — keep code compatible with ARM64/Bookworm
