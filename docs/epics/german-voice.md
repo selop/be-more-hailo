@@ -1,6 +1,6 @@
 # BMO understands and speaks German
 
-Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: blocked (the user has to listen: steps 3 and 7)
+Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: in progress
 
 German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-to-text language and a "respond only in German" rule. The gaps are below.
 
@@ -8,7 +8,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 
 | # | Question | Answer | Decided |
 |---|---|---|---|
-| D1 | Which German voice? | `de_DE-thorsten-high` on trial (the user, after hearing ramona-low: "detection is pretty bad"). Was ramona-low earlier the same day. | 2026-11-20, changed |
+| D1 | Which German voice? | `de_DE-thorsten-high`. Chosen by the user knowing it is slow to synthesise (0.90 s of computing per second of speech). | 2026-11-20 |
 | D2 | Who writes German replies: the local 1.5B model or the hosted one (Haiku, `LLM_BACKEND=cloud`)? | Hosted (Haiku). Inferred: the user set `LLM_BACKEND=cloud` and a key in the Pi's `.env` on 2026-11-20; not said in words. | 2026-11-20 (inferred) |
 | D3 | Wake word | Keep the current model for now | 2026-11-20 |
 
@@ -18,7 +18,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 |---|---|---|---|---|
 | 1 | Voice audition | – | – | dropped: the user chose ramona-low (D1) |
 | 2 | Measure German speech-to-text on the NPU with ten German sentences | – | At least 8 of 10 transcripts are usable; numbers in the Log | done (measurement only, see Log) |
-| 3 | Install thorsten-high, set it in `[voice.de]`, confirm it in German mode on the Pi (speed 1.4 and the speaker filter) | – | `make say` speaks German with thorsten-high; the user confirms speed and tone | doing (installed and measured; waiting for the user's ear) |
+| 3 | Install thorsten-high, set it in `[voice.de]`, confirm it in German mode on the Pi | – | `make say` speaks German with thorsten-high; the user confirms the voice | done 1ef6e33 (voice confirmed by the user; speed 1.4 not commented on) |
 | 4 | German timers and reminders in `core/timers.py` | 2 | New tests in `tests/test_timers.py` pass for "Stell einen Timer auf 5 Minuten" and "Erinnere mich in 10 Minuten an den Tee"; a `make say` turn starts a timer | done 6f2c79a |
 | 5 | German keywords for photo, picture, music and web search, next to the English ones in `core/actions.py` (moving them into the pack was dropped: nothing needs it yet) | 2 | Tests: "Mach ein Foto", "Spiel ein Lied", "Mal mir ein Bild von einer Katze", "Wie wird das Wetter morgen in Berlin?" each take the right route | done (this commit) |
 | 6 | Translate the seven lines missing from `[lines.de]` (`confused_reset`, `empty_reply`, `stream_error`, `think_error`, `vision_error`, `vision_missing`, `vision_timeout`) | – | A test fails when a key in `[lines.en]` has no German line | done (this commit) |
@@ -34,6 +34,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 16 | An action's JSON is never cut in two by the sentence splitter | – | Test `test_action_json_after_a_blank_line_is_not_cut_in_two`; a hosted-model turn with an action speaks no JSON | done 84e4eb1 |
 | 17 | A blank line in the reply ends the chunk before it, instead of flushing whatever follows word by word ("Yay," was spoken alone) | 16 | Test: JSON, blank line, then a sentence gives the sentence as one chunk | done (this commit) |
 | 18 | A dot after a digit does not end a spoken chunk ("der 20." / "November 2026." were spoken apart) | 8 | Test `test_german_date_is_not_cut_at_the_ordinal_dot`; a German date turn on the Pi is spoken in one piece | done (this commit) |
+| 19 | Hide the slow synthesis: prepare the next sentence while the current one is playing | 3 | In a four-sentence German turn the gaps between sentences are under 1 s (trace: each `spoke` starts within 1 s of the previous audio ending) | todo |
 
 ## Log
 
@@ -65,3 +66,4 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 - Not measured yet: the user's own German through BMO's microphone.
 - 2026-11-20, step 3: voice changed to thorsten-high (114 MB, downloaded to the Pi; `setup.sh` now fetches it). The same ten sentences, spoken through BMO's speaker filter and transcribed by the CPU Whisper model: at speed 1.4, 8 of 10 exact and 2 with one word off ("ist das gerade", "Robote"); at speed 1.0, 7 exact and 3 slightly off. Ramona-low at 1.4 managed about 3 of 7. Speed stays at 1.4 until the user has listened.
 - 2026-11-20, step 3, cost of thorsten-high: measured on the Pi with the agent running, seconds of computing per second of speech: thorsten-high 0.90, thorsten-medium 0.15, ramona-low 0.16. In a real turn a 7.6 s sentence took 5.6 s to synthesise and the fourth sentence of a reply started 23.5 s after the question. Clarity by the same Whisper test at speed 1.4: high 8 of 10 exact, medium 6 of 10 (two badly off: "Teig mal" for "Timer", "Erkarte" for "einer Katze"), ramona-low about 3 of 7. thorsten-medium is downloaded to the Pi as well. The pack is set to thorsten-high; the choice between high (clearer, slow) and medium (fast) is the user's.
+- 2026-11-20: D1 final: thorsten-high. New step 19 for the pauses it causes. The German clips on the Pi (3 ack, 10 greeting, 5 thinking, dated March 2026) are in the old voice; step 11 regenerates them.
