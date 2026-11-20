@@ -198,9 +198,9 @@ def strip_prompt_leakage(content: str) -> str:
 
 def extract_pronunciation(content: str) -> tuple[str, str] | None:
     """Extract ``!PRONOUNCE: word=phonetic`` from *content*, or ``None``."""
-    m = re.search(r'!PRONOUNCE:\s*([a-zA-Z0-9_-]+)\s*=\s*([a-zA-Z0-9_-]+)', content, re.IGNORECASE)
+    m = re.search(r'!PRONOUNCE:\s*([a-zA-Z0-9_-]+)\s*=\s*([a-zA-Z0-9_.-]+)', content, re.IGNORECASE)
     if m:
-        return m.group(1).strip(), m.group(2).strip()
+        return m.group(1).strip(), m.group(2).strip().rstrip('.')
     return None
 
 

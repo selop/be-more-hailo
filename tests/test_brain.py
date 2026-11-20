@@ -96,6 +96,14 @@ def test_pronunciation_tag_is_learned_and_never_spoken():
             assert [c.strip() for c in chunks] == ["Got it."], chunks
         assert learned == [("tomato", "tuh-may-toe")] * 2
 
+        # Dots in the phonetic spelling cut the tag into several sentences: none of it is spoken
+        fake = FakeLLM("")
+        fake.tokens = ["Got it.", "\n", "!PRONOUNCE:", " tomato=tuh.", "may.", "toe"]
+        llm._get_llm = lambda: fake
+        del learned[:]
+        chunks = list(llm.Brain().stream_think("you pronounce it tuh may toe"))
+        assert [c.strip() for c in chunks] == ["Got it."] and learned == [("tomato", "tuh.may.toe")], (chunks, learned)
+
         # The model parrots the tag although nobody corrected anything: spoken text is clean, nothing is saved
         fake = FakeLLM("")
         fake.tokens = ["Once upon a time.", "\n!PRONOUNCE:", " word=phonetic"]

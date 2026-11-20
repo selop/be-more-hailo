@@ -139,6 +139,7 @@ class Brain:
         full_content = ""
         buffer = ""
         sentences_yielded = 0
+        tag_seen = False        # the pronunciation tag ends the spoken reply
         MAX_SENTENCES = 4
 
         try:
@@ -175,7 +176,8 @@ class Brain:
                     # If buffer ends with punctuation or newline, yield it
                     if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
                         cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
-                        out_chunk = CHARACTER.normalize_name(cleaned)
+                        out_chunk = "" if tag_seen else CHARACTER.normalize_name(cleaned)
+                        tag_seen = tag_seen or strip_pronunciation_tag(buffer) != buffer.strip()
                         # Clear before yielding: breaking out at the sentence
                         # limit used to leave the last sentence in the buffer,
                         # and it was then yielded (and spoken) a second time.
@@ -189,7 +191,7 @@ class Brain:
             # Yield any remaining buffer
             if buffer.strip():
                 cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
-                out_chunk = CHARACTER.normalize_name(cleaned)
+                out_chunk = "" if tag_seen else CHARACTER.normalize_name(cleaned)
                 if any(ch.isalnum() for ch in out_chunk):
                     yield out_chunk
 
