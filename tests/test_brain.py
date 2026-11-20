@@ -71,6 +71,16 @@ def test_misspelled_name_in_reply_is_corrected():
     assert chunks[0].strip() == f"{CHARACTER.name} is happy."
 
 
+def test_think_is_the_streamed_reply_joined():
+    saved = (llm._get_llm, llm._prepare_prompt)
+    llm._get_llm = lambda: FakeLLM("Hello there. How are you?")
+    llm._prepare_prompt = lambda history: history
+    try:
+        assert llm.Brain().think("hi") == "Hello there. How are you?"
+    finally:
+        llm._get_llm, llm._prepare_prompt = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

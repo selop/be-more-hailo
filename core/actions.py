@@ -193,20 +193,6 @@ def strip_prompt_leakage(content: str) -> str:
 
 # ── JSON action extraction ───────────────────────────────────────────────
 
-def extract_json_action(content: str) -> dict | None:
-    """Parse the first ``{...}`` block with an ``"action"`` key, or ``None``."""
-    clean = content.replace('\u201c', '"').replace('\u201d', '"')
-    clean = clean.replace('\u2018', "'").replace('\u2019', "'")
-    match = re.search(r'\{.*?\}', clean, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            if "action" in data:
-                return data
-        except json.JSONDecodeError:
-            pass
-    return None
-
 
 # ── Pronunciation tag helpers ────────────────────────────────────────────
 

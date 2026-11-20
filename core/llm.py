@@ -4,7 +4,6 @@ NPU lifecycle lives in ``core.npu``; keyword matching and response
 cleaning live in ``core.actions``.  This module ties them together.
 """
 
-import json
 import logging
 import time
 
@@ -17,9 +16,7 @@ from .actions import (
     detect_pre_llm_action_json,
     needs_web_search,
     inject_search_context,
-    clean_llm_response,
     strip_prompt_leakage,
-    extract_json_action,
     extract_pronunciation,
     strip_pronunciation_tag,
 )
@@ -98,92 +95,9 @@ class Brain:
             return True
         return False
 
-    # ── Non-streaming inference ───────────────────────────────────────────
-
     def think(self, user_text: str) -> str:
-        """Send text to Hailo LLM (direct NPU API) and get response."""
-        self.history.append({"role": "user", "content": user_text})
-
-        # Pre-LLM shortcut actions (camera / image / music)
-        action_json = detect_pre_llm_action_json(user_text)
-        if action_json is not None:
-            bmo_print("LLM", f"Pre-LLM action: {action_json[:80]}")
-            self.history.append({"role": "assistant", "content": action_json})
-            return action_json
-
-        bmo_print("LLM", f"No pre-LLM action matched for: '{user_text[:60].lower()}'")
-
-        # Pre-LLM web search
-        search_injected = False
-        if needs_web_search(user_text):
-            try:
-                search_result = search_web(user_text)
-                if search_result and search_result not in ("SEARCH_EMPTY", "SEARCH_ERROR") and len(search_result) > 50:
-                    self.history[-1]["content"] = inject_search_context(user_text, search_result)
-                    search_injected = True
-            except Exception as e:
-                logger.warning(f"Pre-LLM web search failed: {e}")
-
-        try:
-            llm = _get_llm()
-            prompt = _prepare_prompt(self.history)
-            logger.info("Sending request to Hailo LLM (direct NPU)")
-            content = llm.generate_all(prompt=prompt, temperature=0.4, max_generated_tokens=100)
-
-            # Strip stop tokens
-            for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
-                content = content.replace(tok, "")
-            content = content.strip()
-
-            # Check if the LLM outputted a JSON action (like search_web)
-            action_data = extract_json_action(content)
-            if action_data:
-                if action_data.get("action") == "take_photo":
-                    logger.info("LLM requested to take a photo.")
-                    return json.dumps({"action": "take_photo"})
-
-                elif action_data.get("action") == "search_web":
-                    query = action_data.get("query", "")
-                    logger.info(f"LLM requested web search for: {query}")
-                    search_result = search_web(query)
-                    summary_messages = [
-                        {"role": "system", "content": CHARACTER.prompt("search_summary")},
-                        {"role": "user", "content": f"RESULT: {search_result}\nUser Question: {user_text}"}
-                    ]
-                    content = llm.generate_all(prompt=summary_messages, temperature=0.4, max_generated_tokens=100)
-                    for tok in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
-                        content = content.replace(tok, "")
-                    content = content.strip()
-
-            # Check for pronunciation learning tag
-            pron = extract_pronunciation(content)
-            if pron:
-                word, phonetic = pron
-                logger.info(f"Learned new pronunciation from LLM: {word} -> {phonetic}")
-                add_pronunciation(word, phonetic)
-                content = strip_pronunciation_tag(content)
-
-            content = clean_llm_response(content)
-
-            self.history.append({"role": "assistant", "content": content})
-
-            # Detect stuck LLM (refusal loops / repetition)
-            if self._check_stuck(content):
-                return say("confused_reset")
-
-            # Clean injected search context from history
-            if search_injected:
-                for msg in reversed(self.history):
-                    if msg.get("role") == "user" and msg.get("content", "").startswith("[LIVE DATA:"):
-                        msg["content"] = user_text
-                        break
-
-            self._trim_history()
-            return content
-
-        except Exception as e:
-            logger.error(f"Brain Exception: {e}", exc_info=True)
-            return say("think_error")
+        """The whole reply as one string, for callers that do not stream."""
+        return " ".join(chunk.strip() for chunk in self.stream_think(user_text))
 
     # ── Streaming inference ───────────────────────────────────────────────
 
@@ -303,11 +217,6 @@ class Brain:
             logger.error(f"Brain Exception: {e}", exc_info=True)
             trace.set("llm_error", repr(e))
             yield say("stream_error")
-
-    # ── History management ────────────────────────────────────────────────
-
-    def get_history(self):
-        return self.history
 
     def set_history(self, new_history):
         if not new_history or new_history[0].get("role") != "system":
