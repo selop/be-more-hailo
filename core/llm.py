@@ -55,9 +55,12 @@ _REFUSAL_PATTERNS = [
     "as an ai",
     "as a language model",
     "don't ask me to repeat",
+    "ich kann nicht fortfahren", "ich kann das nicht preisgeben", "dabei kann ich nicht helfen",
+    "als ki", "als sprachmodell",
 ]
 _name = CHARACTER.name.lower()
-_REFUSAL_PATTERNS += [f"please allow {_name} to respond", f"i'm not {_name}", f"i am not {_name}"]
+_REFUSAL_PATTERNS += [f"please allow {_name} to respond", f"i'm not {_name}", f"i am not {_name}",
+                      f"ich bin nicht {_name}"]
 
 
 def _reply_tokens(history):

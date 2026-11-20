@@ -172,6 +172,13 @@ def test_blank_line_ends_the_chunk_before_it():
         llm._get_llm, llm._prepare_prompt = saved
 
 
+def test_german_refusal_resets_the_history():
+    brain, chunks = stream("Als KI kann ich dabei leider nicht helfen.", user_text="wer bist du")
+    assert chunks and len(brain.history) == 1          # only the system prompt is left
+    brain, _ = stream("Mir geht es gut, danke!", user_text="wie geht es dir")
+    assert len(brain.history) == 3
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
