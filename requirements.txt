@@ -12,5 +12,6 @@ librosa
 soundfile
 google-generativeai
 python-dotenv
+anthropic
 opencv-python
 tomli; python_version < "3.11"

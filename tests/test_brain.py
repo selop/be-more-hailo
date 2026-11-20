@@ -115,6 +115,34 @@ def test_pronunciation_tag_is_learned_and_never_spoken():
         llm._get_llm, llm._prepare_prompt, llm.add_pronunciation = saved
 
 
+def test_cloud_backend_answers_and_falls_back_to_local_when_it_fails():
+    saved = (llm._get_llm, llm._prepare_prompt, llm.LLM_BACKEND, llm.cloud_llm.stream)
+    llm._get_llm = lambda: FakeLLM("Local answer.")
+    llm._prepare_prompt = lambda history: history
+    llm.LLM_BACKEND = "cloud"
+    try:
+        seen = []
+
+        def cloud(history):
+            seen.append([m["role"] for m in history])
+            yield from llm.cloud_llm._words(["Cloud ", "answer. Sec", "ond one."])    # cut anywhere, as the API streams
+        llm.cloud_llm.stream = cloud
+        brain = llm.Brain()
+        assert [c.strip() for c in brain.stream_think("hi")] == ["Cloud answer.", "Second one."]
+        assert seen == [["system", "user"]] and brain.history[-1]["content"] == "Cloud answer. Second one."
+
+        def offline(history):
+            raise ConnectionError("no network")
+            yield
+        llm.cloud_llm.stream = offline
+        assert [c.strip() for c in llm.Brain().stream_think("hi")] == ["Local answer."]
+
+        llm.cloud_llm.stream = lambda history: iter(())         # a refusal: nothing said
+        assert [c.strip() for c in llm.Brain().stream_think("hi")] == ["Local answer."]
+    finally:
+        llm._get_llm, llm._prepare_prompt, llm.LLM_BACKEND, llm.cloud_llm.stream = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

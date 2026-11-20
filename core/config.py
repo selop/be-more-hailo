@@ -98,6 +98,12 @@ def t(key):
     Returns a list (alternatives) or a single string depending on the key."""
     return CHARACTER.line(key, LANGUAGE)
 
+# Which model writes the replies: "local" (the NPU) or "cloud" (a hosted model,
+# see core/cloud_llm.py). To change the hosted model, check that it accepts
+# the options cloud_llm.py sends.
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "local")
+CLOUD_LLM_MODEL = "claude-opus-5-5"
+
 
 def say(key, **values):
     """Like :func:`t`, but always one string (a random pick from a list).

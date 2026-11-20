@@ -145,6 +145,17 @@ MIC_SAMPLE_RATE   = 48000
 
 Env vars override at runtime: `ALSA_DEVICE`, `GEMINI_API_KEY`, `BMO_LANGUAGE`.
 
+### Optional: a hosted model for replies
+
+The local 1.5B model is small. To let Claude write the replies instead, put these two lines in `.env` in the project folder and restart:
+
+```
+LLM_BACKEND=cloud
+ANTHROPIC_API_KEY=your-key
+```
+
+With this on, what you say (as text) and the conversation history are sent to Anthropic, and each reply costs API usage. Speech-to-text, the wake word, vision and the voice stay on the device. Without a network the local model answers as before.
+
 ---
 
 ## Camera and vision

@@ -4,11 +4,12 @@ NPU lifecycle lives in ``core.npu``; keyword matching and response
 cleaning live in ``core.actions``.  This module ties them together.
 """
 
+import contextlib
 import logging
 import time
 
-from . import trace
-from .config import CHARACTER, get_system_prompt, say
+from . import cloud_llm, trace
+from .config import CHARACTER, LLM_BACKEND, get_system_prompt, say
 from .tts import add_pronunciation
 from .search import search_web
 from .log import bmo_print
@@ -57,6 +58,33 @@ _REFUSAL_PATTERNS = [
 ]
 _name = CHARACTER.name.lower()
 _REFUSAL_PATTERNS += [f"please allow {_name} to respond", f"i'm not {_name}", f"i am not {_name}"]
+
+
+def _reply_tokens(history):
+    """The reply to *history*, piece by piece: from the hosted model when
+    ``LLM_BACKEND=cloud``, otherwise from the local one. If the hosted model
+    fails before saying anything (no network, no key, a refusal), the local
+    model answers instead."""
+    if LLM_BACKEND == "cloud":
+        said_something = False
+        try:
+            for piece in cloud_llm.stream(history):
+                said_something = True
+                yield piece
+            if said_something:
+                trace.set("llm_backend", "cloud")
+                return
+            raise RuntimeError("empty reply")
+        except Exception as e:  # noqa: BLE001 - any cloud failure means: answer locally
+            if said_something:
+                raise
+            bmo_print("LLM", f"Cloud model failed ({e!r}); using the local model")
+            trace.set("cloud_error", repr(e))
+
+    trace.set("llm_backend", "local")
+    logger.info("Stream request to Hailo LLM (direct NPU)")
+    with _get_llm().generate(prompt=_prepare_prompt(history), temperature=0.4, max_generated_tokens=100) as gen:
+        yield from gen
 
 
 class Brain:
@@ -143,13 +171,11 @@ class Brain:
         MAX_SENTENCES = 4
 
         try:
-            llm = _get_llm()
-            prompt = _prepare_prompt(self.history)
-            logger.info("Stream request to Hailo LLM (direct NPU)")
+            trace.set("prompt_messages", len(self.history) - 1)
             stream_start = time.time()
             first_token_logged = False
 
-            with llm.generate(prompt=prompt, temperature=0.4, max_generated_tokens=100) as gen:
+            with contextlib.closing(_reply_tokens(self.history)) as gen:
                 for token in gen:
                     if not token:
                         continue
@@ -198,7 +224,6 @@ class Brain:
             self.history.append({"role": "assistant", "content": full_content})
             trace.set("llm_raw", full_content)
             trace.set("llm_ms", int((time.time() - stream_start) * 1000))
-            trace.set("prompt_messages", len(prompt))
 
             # The user corrected a pronunciation: remember it for the voice
             # Only when the user spoke about it: a stray or parroted tag must not rewrite speech for good

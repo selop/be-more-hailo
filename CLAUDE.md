@@ -66,6 +66,7 @@ agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──�
                          ├── npu.py          # VDevice + LLM + VLM lifecycle (hardware layer)
                          ├── actions.py      # Keyword matching, response cleaning (pure functions, no HW)
                          ├── llm.py          # Brain class: conversation history + inference orchestration
+                         ├── cloud_llm.py    # Optional hosted model for replies (LLM_BACKEND=cloud)
                          ├── dispatch.py     # Stream chunk → action dispatch (camera, music, timer)
                          ├── timers.py       # Recognises timer and reminder requests before the LLM (pure functions)
                          ├── audio_input.py  # Wake word detection + mic recording
@@ -156,6 +157,7 @@ All configuration lives in `core/config.py`. Key settings:
 - `WAKE_WORD_THRESHOLD` — Wake word sensitivity (default 0.35)
 - End of speech is decided by `Endpointer` in `core/audio_input.py`: speech is anything above twice the room's measured noise floor; a recording ends 0.9 s after speech stops, after 4 s without speech, or at 15 s
 - `get_system_prompt()` — fills the character pack's `prompts.system` with time, date and language rule
+- `LLM_BACKEND` — `local` (default, the NPU model) or `cloud` (Claude through `core/cloud_llm.py`; needs `ANTHROPIC_API_KEY`). With `cloud`, the user's words and the history leave the device; if the call fails before any text arrives, the local model answers that turn. The hosted model is `CLOUD_LLM_MODEL` in `core/config.py`. Vision, speech-to-text, the wake word and the screensaver's idle thoughts stay local
 - `CHARACTER` — the active character pack; set the `CHARACTER` env var to choose one (default `bmo`)
 
 Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `BMO_LANGUAGE` (en/de).
