@@ -14,11 +14,15 @@ from .timers import parse_timer_request, second_person
 
 
 # ── Keyword lists (single source of truth) ────────────────────────────────
+# English and German side by side: whichever language is heard, the request is recognised.
 
 CAMERA_KEYWORDS = [
     "take a photo", "take a picture", "take photo", "take picture",
     "look at", "what do you see", "what can you see", "use your camera",
     "photograph", "snap a photo",
+    "mach ein foto", "mache ein foto", "mach mal ein foto", "machst du ein foto", "foto machen",
+    "foto von mir", "was siehst du", "was kannst du sehen", "schau dir", "guck dir",
+    "benutz deine kamera", "fotografier",
 ]
 
 DISPLAY_IMAGE_KEYWORDS = [
@@ -28,6 +32,9 @@ DISPLAY_IMAGE_KEYWORDS = [
     "picture of", "image of", "photo of",
     "generate an image", "generate a picture",
     "draw me", "draw a",
+    "zeig mir ein bild", "zeige mir ein bild", "zeig ein bild", "bild von", "foto von",
+    "mal mir ein", "male mir", "mal ein bild", "zeichne mir", "zeichne ein",
+    "erstelle ein bild", "generiere ein bild",
 ]
 
 MUSIC_KEYWORDS = [
@@ -37,6 +44,9 @@ MUSIC_KEYWORDS = [
     "can you sing", "will you sing", "do you sing",
     "play your music", "jam out", "dance for me",
     "play me some music",
+    "spiel musik", "spiele musik", "spiel ein lied", "spiele ein lied", "spiel mir ein lied",
+    "spiel etwas musik", "spiel mir musik", "mach musik", "sing ein lied", "sing mir", "sing etwas",
+    "sing für mich", "kannst du singen", "tanz für mich",
 ]
 # Requests that address the character by name ("sing for <name>")
 _name = CHARACTER.name.lower()
@@ -47,11 +57,15 @@ REALTIME_KEYWORDS = [
     "weather", "forecast", "temperature", "tonight", "tomorrow",
     "news", "latest", "right now", "score", "stocks", "bitcoin",
     "crypto", "price of", "happening", "recently", "live",
+    # German. Not "morgen" or "gerade": they are in "Guten Morgen" and "Wie spät ist es gerade?"
+    "wetter", "vorhersage", "temperatur", "heute abend", "nachrichten", "neueste", "aktuell",
+    "spielstand", "aktien", "preis von", "kostet",
 ]
 
 QUESTION_MARKERS = [
     "what", "who", "when", "where", "find", "search", "tell me",
     "look up", "check", "is there", "did", "?",
+    "was", "wer", "wann", "wo", "wie", "finde", "such", "sag mir", "schau nach", "gibt es",
 ]
 
 PROMPT_LEAK_PATTERNS = [
@@ -71,6 +85,10 @@ _DISPLAY_IMAGE_PREFIXES = [
     "generate an image of", "generate a picture of",
     "draw me a", "draw me an", "draw me", "draw a", "draw an",
     "picture of", "image of", "photo of",
+    "zeig mir ein bild von", "zeige mir ein bild von", "zeig ein bild von",
+    "mal mir ein bild von", "male mir ein bild von", "mal ein bild von",
+    "zeichne mir", "zeichne", "male mir", "mal mir", "erstelle ein bild von", "generiere ein bild von",
+    "bild von", "foto von",
 ]
 
 
@@ -155,7 +173,9 @@ def vlm_question(user_text: str) -> str:
     lower = user_text.lower()
     if any(lower.strip().rstrip(".!?") == p for p in CAMERA_KEYWORDS) or \
        any(lower.startswith(p) for p in ["take a photo", "take a picture", "take photo",
-                                          "take picture", "snap a photo", "photograph"]):
+                                          "take picture", "snap a photo", "photograph",
+                                          "mach ein foto", "mache ein foto", "mach mal ein foto",
+                                          "machst du ein foto", "fotografier"]):
         return "What do you see in this image? Describe it briefly."
     return user_text
 

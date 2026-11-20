@@ -451,6 +451,21 @@ def test_transcript_with_leaked_decoder_tokens_counts_as_nothing_heard():
     assert _clean_transcription("Wie spät ist es gerade?") == "Wie spät ist es gerade?"
 
 
+def test_german_requests_take_the_same_shortcuts_as_english():
+    from core.actions import detect_pre_llm_action, needs_web_search, vlm_question
+    assert detect_pre_llm_action("Mach ein Foto von mir.") == {"action": "take_photo"}
+    assert detect_pre_llm_action("Was siehst du?") == {"action": "take_photo"}
+    assert detect_pre_llm_action("Spiel ein Lied für mich.") == {"action": "play_music"}
+    picture = detect_pre_llm_action("Mal mir ein Bild von einer Katze.")
+    assert picture["action"] == "display_image" and "einer%20Katze" in picture["image_url"], picture
+    assert vlm_question("Mach ein Foto von mir.").startswith("What do you see")
+    assert needs_web_search("Wie wird das Wetter morgen in Berlin?")
+    # Ordinary German sentences take no shortcut
+    for sentence in ("Guten Morgen, wie geht es dir heute?", "Wie spät ist es gerade?",
+                     "Erzähl mir einen Witz über Roboter.", "Was ist die Hauptstadt von Frankreich?"):
+        assert detect_pre_llm_action(sentence) is None and not needs_web_search(sentence), sentence
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
