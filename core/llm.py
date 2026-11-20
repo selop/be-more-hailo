@@ -174,13 +174,13 @@ class Brain:
 
                     # If buffer ends with punctuation or newline, yield it
                     if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
-                        cleaned = strip_prompt_leakage(buffer)
+                        cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
                         out_chunk = CHARACTER.normalize_name(cleaned)
                         # Clear before yielding: breaking out at the sentence
                         # limit used to leave the last sentence in the buffer,
                         # and it was then yielded (and spoken) a second time.
                         buffer = ""
-                        if out_chunk.strip():
+                        if any(ch.isalnum() for ch in out_chunk):    # a lone '!' is not a sentence
                             yield out_chunk
                             sentences_yielded += 1
                             if sentences_yielded >= MAX_SENTENCES:
@@ -188,15 +188,23 @@ class Brain:
 
             # Yield any remaining buffer
             if buffer.strip():
-                cleaned = strip_prompt_leakage(buffer)
+                cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
                 out_chunk = CHARACTER.normalize_name(cleaned)
-                if out_chunk.strip():
+                if any(ch.isalnum() for ch in out_chunk):
                     yield out_chunk
 
             self.history.append({"role": "assistant", "content": full_content})
             trace.set("llm_raw", full_content)
             trace.set("llm_ms", int((time.time() - stream_start) * 1000))
             trace.set("prompt_messages", len(prompt))
+
+            # The user corrected a pronunciation: remember it for the voice
+            pron = extract_pronunciation(full_content)
+            if pron:
+                word, phonetic = pron
+                logger.info(f"Learned new pronunciation from LLM: {word} -> {phonetic}")
+                add_pronunciation(word, phonetic)
+                trace.set("pronunciation", f"{word}={phonetic}")
 
             # Detect stuck LLM (refusal loops / repetition) — the bad
             # response was already yielded, but we reset history so the

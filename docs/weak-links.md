@@ -12,7 +12,7 @@ Last sweep: 2026-11-19. The web interface was removed the same day; WEB-1 was dr
 | 4 | TEST-1 | No utterance eval set; tests cover only part of the engine | Intent, Brain | partly fixed |
 | 5 | INTENT-2 | Intent routing misfires on substrings | Intent | open |
 | 6 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | fixed |
-| 7 | BRAIN-2 | Pronunciation learning does not work on the device | Brain | open |
+| 7 | BRAIN-2 | Pronunciation learning does not work on the device | Brain | fixed in code; the model did not emit the tag when tried |
 | 8 | FACE-1 | A generated image is never cleared | Face | fixed (uncommitted) |
 | 9 | VOICE-1 | A reply cannot be cancelled; speakers cut each other off | Voice, Conversation | open |
 | 10 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | partly fixed |
@@ -164,3 +164,5 @@ Measured on the Pi (SD card install), 2026-11-20:
 - At boot the model read starved Chromium and left a blank window. The agent now waits for the face page before loading the models.
 
 FACE-3, 2026-11-20 (branch `refactor/solid`, first pass of the `solid-python` skill): mute moved from `Agent` to `Conversation.toggle_mute()`, the screensaver became the class `Screensaver` taking the state store (6 inputs instead of 18 callbacks), and the camera takes the store instead of two of its methods and a getter. `Agent` is 178 lines. The pointer script went from 12 places to 9. Left alone: `Conversation` (493 lines; timers and music are the next group to move out), `Brain` with its twin `think()` and `stream_think()` (BRAIN-2), `DisplayServer`, and `Agent.__init__` as the composition root.
+
+BRAIN-2, 2026-11-20 (branch `refactor/solid`, second pass of `solid-python`): `Brain.think()` is now the streamed reply joined, so there is one inference path. The streamed path learns a `!PRONOUNCE: word=phonetic` tag and strips it before speech, also when the stream splits the tag after its `!` (tests in `tests/test_brain.py`). On the device one correction ("you pronounce zorblax as zor-blaks") got an apology and no tag from the 1.5B model, so whether it works in practice depends on the model following that prompt line. Left alone this pass: `Conversation` (timers and music are tested where they are), `DisplayServer`, `dispatch_stream()`, `handle_photo()`.

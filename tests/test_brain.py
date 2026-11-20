@@ -81,6 +81,24 @@ def test_think_is_the_streamed_reply_joined():
         llm._get_llm, llm._prepare_prompt = saved
 
 
+def test_pronunciation_tag_is_learned_and_never_spoken():
+    learned = []
+    saved = (llm._get_llm, llm._prepare_prompt, llm.add_pronunciation)
+    llm._prepare_prompt = lambda history: history
+    llm.add_pronunciation = lambda word, phonetic: learned.append((word, phonetic))
+    try:
+        for tokens in (["Got", " it.\n!PRONOUNCE:", " tomato=tuh-may-toe"],
+                       ["Got it.", "\n", "!", "PRONOUNCE:", " tomato=tuh-may-toe"]):     # tag split after the '!'
+            fake = FakeLLM("")
+            fake.tokens = tokens
+            llm._get_llm = lambda fake=fake: fake
+            chunks = list(llm.Brain().stream_think("it is pronounced tuh-may-toe"))
+            assert [c.strip() for c in chunks] == ["Got it."], chunks
+        assert learned == [("tomato", "tuh-may-toe")] * 2
+    finally:
+        llm._get_llm, llm._prepare_prompt, llm.add_pronunciation = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

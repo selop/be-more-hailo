@@ -206,4 +206,5 @@ def extract_pronunciation(content: str) -> tuple[str, str] | None:
 
 def strip_pronunciation_tag(content: str) -> str:
     """Remove the ``!PRONOUNCE:`` tag from *content*."""
-    return re.sub(r'!PRONOUNCE:.*', '', content, flags=re.IGNORECASE).strip()
+    # The stream can split the tag after its '!', so a chunk may start with the bare word
+    return re.sub(r'(?i:!PRONOUNCE:).*|^\s*PRONOUNCE:.*', '', content).strip()
