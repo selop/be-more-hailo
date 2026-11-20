@@ -107,7 +107,6 @@ Modules stay decoupled — they receive string callbacks, not `StateStore` direc
 
 | Module | Reads | Via |
 |--------|-------|-----|
-| `AnimationEngine` | expression (face frames), phase (speed, screensaver trigger) | `get_state() -> str`, `get_phase() -> str` |
 | `screensaver.py` | phase (is screensaver active?), expression (revert guards) | `get_state() -> str`, `get_expression() -> str` |
 | `audio_input.py` | phase (wake word suppression) | `get_state() -> str` (returns `phase.value`) |
 | `camera.py` | phase (analyzing sound loop guard) | `get_state() -> str` (unchanged) |
@@ -116,7 +115,7 @@ Modules stay decoupled — they receive string callbacks, not `StateStore` direc
 
 ## The `set_state()` Bridge
 
-`BotGUI.set_state(state_str, msg)` is the backward-compatible entry point. It routes automatically:
+`Agent.set_state(state_str, msg)` is the backward-compatible entry point. It routes automatically:
 
 ```python
 def set_state(self, state, msg=""):
@@ -147,6 +146,6 @@ New code should prefer `Phase` enum for control flow and plain strings for expre
 
 ## What's NOT in the Store
 
-- `thinking_audio_process` — subprocess handle, not state. Lives on `BotGUI`.
-- `last_screensaver_audio_time` — screensaver-specific bookkeeping, stays on `BotGUI`.
+- `thinking_audio_process` — subprocess handle, not state. Lives on `Conversation`.
+- `last_screensaver_audio_time` — screensaver-specific bookkeeping, stays on `Agent`.
 - Audio/TTS/LLM singletons — managed by their own modules (`core/tts.py`, `core/llm.py`, `core/npu.py`).

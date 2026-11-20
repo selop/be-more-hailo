@@ -99,7 +99,7 @@ cd be-more-agent && chmod +x *.sh && ./setup.sh
 ```bash
 source venv/bin/activate
 
-# On-device GUI (fullscreen Tkinter on HDMI/DSI display)
+# On-device agent (live face in Chromium on the HDMI/DSI display)
 ./start_agent.sh
 ```
 
@@ -111,7 +111,7 @@ Install the service so BMO starts automatically on boot:
 ./setup_services.sh
 ```
 
-This creates the **`bmo-gui`** systemd unit (Tkinter fullscreen), enables it on boot, and starts it immediately.
+This creates the **`bmo-gui`** systemd unit (the agent and its live face), enables it on boot, and starts it immediately.
 
 Common service commands:
 
@@ -143,7 +143,7 @@ MIC_DEVICE_INDEX  = 1
 MIC_SAMPLE_RATE   = 48000
 ```
 
-Env vars override at runtime: `ALSA_DEVICE`, `SILENCE_THRESHOLD`, `GEMINI_API_KEY`, `BMO_LANGUAGE`.
+Env vars override at runtime: `ALSA_DEVICE`, `GEMINI_API_KEY`, `BMO_LANGUAGE`.
 
 ---
 

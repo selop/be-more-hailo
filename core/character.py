@@ -29,7 +29,7 @@ REQUIRED_LINES = (
     "vision_missing", "vision_timeout", "vision_error",
     "timer_set", "timer_done", "reminder",
     "music_intros", "no_music", "camera_intros", "no_camera", "camera_error",
-    "draw_image", "eq_open", "eq_close", "eq_test", "eq_title",
+    "draw_image", 
 )
 REQUIRED_THEME = (
     "face_bg", "status_fg", "alert_fg", "bubble_fill", "bubble_outline",

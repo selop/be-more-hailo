@@ -7,7 +7,7 @@ echo "Setting up BMO background service..."
 echo "  User: $BMO_USER"
 echo "  Directory: $BMO_DIR"
 
-# 1. Create the GUI Service (on-device Tkinter display)
+# 1. Create the GUI Service (agent and live face)
 #
 # Machine-specific settings (ALSA_DEVICE, MIC_DEVICE_INDEX, BMO_LANGUAGE, ...)
 # live in Environment= lines of the installed unit. If a unit already exists,

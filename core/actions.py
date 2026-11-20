@@ -42,11 +42,6 @@ MUSIC_KEYWORDS = [
 _name = CHARACTER.name.lower()
 MUSIC_KEYWORDS += [f"sing for {_name}", f"{_name} sing"]
 
-VOICE_EQ_KEYWORDS = [
-    "tune your voice", "voice settings", "voice tuner",
-    "adjust your voice", "change your voice", "voice equalizer",
-    "eq settings", "tune voice", "voice eq",
-]
 
 REALTIME_KEYWORDS = [
     "weather", "forecast", "temperature", "tonight", "tomorrow",
@@ -86,7 +81,7 @@ def detect_pre_llm_action(user_text: str) -> dict | None:
     dict, or ``None`` if no shortcut matches.
 
     Returned dict always has an ``"action"`` key (``"set_timer"``,
-    ``"take_photo"``, ``"display_image"``, ``"play_music"`` or ``"voice_eq"``).
+    ``"take_photo"``, ``"display_image"`` or ``"play_music"``).
     """
     lower = user_text.lower()
 
@@ -107,9 +102,6 @@ def detect_pre_llm_action(user_text: str) -> dict | None:
 
     if any(kw in lower for kw in MUSIC_KEYWORDS):
         return {"action": "play_music"}
-
-    if any(kw in lower for kw in VOICE_EQ_KEYWORDS):
-        return {"action": "voice_eq"}
 
     return None
 

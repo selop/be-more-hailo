@@ -1,9 +1,9 @@
-"""Image download, border-framing, and Tkinter display for BMO."""
+"""Image download, border-framing and hand-off to the display."""
 
 import urllib.request
 from io import BytesIO
 
-from PIL import Image, ImageOps, ImageTk
+from PIL import Image, ImageOps
 
 from .config import CHARACTER
 from .log import bmo_print
@@ -42,22 +42,10 @@ def apply_bmo_border(pil_img, width=800, height=480):
     return pil_img
 
 
-def download_and_display(image_url, background_label, master, set_display_image):
-    """Download an image URL, apply BMO border, and show it on the Tkinter label.
-
-    Parameters
-    ----------
-    image_url : str
-        The URL to fetch.
-    background_label : tk.Label
-        The label to display the image on.
-    master : tk.Tk
-        The Tkinter root (for thread-safe ``after()`` scheduling).
-    set_display_image : callable(ImageTk.PhotoImage)
-        Callback to store the PhotoImage reference (prevents GC).
-
-    Returns True on success, False on failure.
-    """
+def download_and_display(image_url, set_display_image):
+    """Download *image_url*, frame it and put it on the display.
+    ``set_display_image`` records the framed PIL image as the one on show.
+    Returns True on success, False on failure."""
     try:
         # Migrate broken gen.pollinations.ai URL to working image.pollinations.ai
         image_url = image_url.replace(
@@ -72,17 +60,9 @@ def download_and_display(image_url, background_label, master, set_display_image)
         img = Image.open(BytesIO(raw_data))
         img = apply_bmo_border(img)
 
-        def show(pil_img=img):
-            try:
-                tk_img = ImageTk.PhotoImage(pil_img)
-                set_display_image(tk_img)
-                background_label.config(image=tk_img)
-                notify_image(img)
-                bmo_print("IMAGE", "Displayed on screen")
-            except Exception as e:
-                bmo_print("IMAGE", f"Tkinter display error: {e}")
-
-        master.after(0, show)
+        set_display_image(img)
+        notify_image(img)
+        bmo_print("IMAGE", "Displayed on screen")
         return True
     except Exception as e:
         bmo_print("IMAGE", f"Download/Display Error: {e}")

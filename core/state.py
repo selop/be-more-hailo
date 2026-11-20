@@ -34,20 +34,13 @@ VALID_EXPRESSIONS = CHARACTER.expressions
 # (listed in the character pack under [face].personas)
 PERSONA_EXPRESSIONS = CHARACTER.personas
 
-# Every string value that has a faces directory — used for animation loading
-ALL_EXPRESSION_NAMES = (
-    {p.value for p in Phase}
-    | VALID_EXPRESSIONS
-    | PERSONA_EXPRESSIONS
-)
-
 
 @dataclass
 class BotState:
     phase: Phase = Phase.WARMUP
     expression: str = "warmup"          # face to display (orthogonal to phase)
     muted: bool = False
-    display_image: object = None        # PhotoImage ref (prevents GC)
+    display_image: object = None        # PIL image on show, or None
     last_spoke_at: float = 0.0
     last_phase_change: float = field(default_factory=time.time)
 

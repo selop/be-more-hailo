@@ -75,6 +75,7 @@ class DisplayServer:
         self._image_version = 0
         self._httpd = None
         self._browser = None
+        self._browser_started = 0.0
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -135,8 +136,16 @@ class DisplayServer:
         except OSError as e:
             bmo_print("FACE", f"Could not start Chromium: {e}")
             return False
+        self._browser_started = time.time()
         bmo_print("FACE", "Chromium started")
         return True
+
+    def ensure_browser(self):
+        """Start Chromium again if it has exited: it is the only display."""
+        # shortcut: one retry per 30 s, no give-up; add a limit if a broken install floods the log
+        if self._browser is not None and self._browser.poll() is not None and time.time() - self._browser_started > 30:
+            bmo_print("FACE", "Chromium exited; starting it again")
+            self.open_browser()
 
     def close_browser(self):
         if self._browser is not None and self._browser.poll() is None:

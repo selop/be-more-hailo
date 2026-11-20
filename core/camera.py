@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 
-from PIL import Image, ImageTk
+from PIL import Image
 
 from .config import t
 from .image_display import apply_bmo_border, notify_image
@@ -24,10 +24,9 @@ class CameraHandler:
     speak : callable(str, msg=str)
     play_sound : callable(str) -> Popen | None
     brain : Brain
-    background_label : tk.Label
-    bubble : ThoughtBubble
-    set_display_image : callable(ImageTk.PhotoImage)
-        Store the PhotoImage reference to prevent GC.
+    hide_bubble : callable()
+    set_display_image : callable(PIL.Image)
+        Record the picture on show.
     clear_display_image : callable()
         Set the display image reference to None.
     stop_thinking_audio : callable()
@@ -40,8 +39,7 @@ class CameraHandler:
         speak,
         play_sound,
         brain,
-        background_label,
-        bubble,
+        hide_bubble,
         set_display_image,
         clear_display_image,
         stop_thinking_audio,
@@ -50,8 +48,7 @@ class CameraHandler:
         self.speak = speak
         self.play_sound = play_sound
         self.brain = brain
-        self.label = background_label
-        self.bubble = bubble
+        self.hide_bubble = hide_bubble
         self.set_display_image = set_display_image
         self.clear_display_image = clear_display_image
         self.stop_thinking_audio = stop_thinking_audio
@@ -67,7 +64,7 @@ class CameraHandler:
         time.sleep(0.2)  # let aplay process exit
 
         # Clear transcription bubble so it doesn't clip the camera face
-        self.bubble.hide()
+        self.hide_bubble()
 
         # Start releasing LLM+STT in background while camera UX plays
         release_thread = threading.Thread(target=_release_llm, daemon=True)
@@ -103,9 +100,7 @@ class CameraHandler:
             try:
                 photo_img = Image.open("temp.jpg")
                 photo_img = apply_bmo_border(photo_img)
-                tk_img = ImageTk.PhotoImage(photo_img)
-                self.set_display_image(tk_img)
-                self.label.config(image=tk_img)
+                self.set_display_image(photo_img)
                 notify_image(photo_img)
             except Exception as e:
                 bmo_print("CAMERA", f"Photo display error: {e}")

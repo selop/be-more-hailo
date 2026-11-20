@@ -63,7 +63,6 @@ class FakeSounds:
 class FakeUI(turn.TurnUI):
     def __init__(self):
         self.calls = []
-        self.tuner_visible = False
 
     def set_status(self, text):
         self.calls.append(("status", text))
@@ -73,15 +72,6 @@ class FakeUI(turn.TurnUI):
 
     def take_photo(self, user_text):
         self.calls.append(("photo", user_text))
-
-    def voice_tuner_visible(self):
-        return self.tuner_visible
-
-    def open_voice_tuner(self):
-        self.calls.append(("tuner", "open"))
-
-    def close_voice_tuner(self):
-        self.calls.append(("tuner", "close"))
 
     def show_image(self, url):
         self.calls.append(("image", url))
@@ -215,15 +205,6 @@ def test_photo_request_reaches_the_ui():
         assert ("photo", "take a photo") in h.ui.calls
         assert h.spoken == []
 
-
-def test_voice_tuner_opens_and_closes_by_voice():
-    with Harness() as h:
-        h.conv.respond("open the voice tuner")
-        assert ("tuner", "open") in h.ui.calls and h.spoken == [say("eq_open")]
-    with Harness() as h:
-        h.ui.tuner_visible = True
-        h.conv.respond("voice tuner")
-        assert ("tuner", "close") in h.ui.calls and h.spoken == [say("eq_close")]
 
 
 def test_image_request_shows_the_image():

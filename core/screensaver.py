@@ -1,6 +1,4 @@
 """Screensaver idle-thought generation and audio loop.
-
-Extracted from ``BotGUI.screensaver_audio_loop()``.
 """
 
 import datetime

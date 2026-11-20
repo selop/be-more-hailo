@@ -11,11 +11,6 @@ if [ -d "venv" ]; then
     pip install -r requirements.txt > /dev/null 2>&1
 fi
 
-# Set display for GUI if not set (assuming user is logged in on :0)
-if [ -z "${DISPLAY:-}" ]; then
-    export DISPLAY=:0
-fi
-
 # Unbuffered stdout/stderr so journalctl gets logs in real-time
 export PYTHONUNBUFFERED=1
 

@@ -6,7 +6,6 @@ cleaning live in ``core.actions``.  This module ties them together.
 
 import json
 import logging
-import re
 import time
 
 from . import trace

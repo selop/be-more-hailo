@@ -172,6 +172,23 @@ def test_mirror_reports_state_timers_and_cleared_pictures():
     assert ("image", {"url": None}) in sent
 
 
+def test_browser_is_restarted_once_it_has_exited():
+    class Exited:
+        def poll(self):
+            return 0
+    display = DisplayServer(port=0)
+    opened = []
+    display.open_browser = lambda: opened.append(1)
+    display.ensure_browser()                    # never started: nothing to restart
+    display._browser = Exited()
+    display._browser_started = time.time()
+    display.ensure_browser()                    # exited just now: wait, do not loop
+    assert opened == []
+    display._browser_started = time.time() - 31
+    display.ensure_browser()
+    assert opened == [1]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

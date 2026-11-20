@@ -5,7 +5,6 @@ classic 8-bit sounding melodies. Output is 44100Hz 16-bit PCM mono WAV.
 """
 import struct
 import wave
-import math
 import random
 import os
 

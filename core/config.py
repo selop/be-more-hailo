@@ -53,7 +53,7 @@ PIPER_MODEL = _voice["model"]
 PIPER_LENGTH_SCALE = _voice["length_scale"]
 
 # Voice EQ — low-pass filter for the character's speaker sound. Defaults come
-# from the character pack; env vars and the on-screen tuner override them.
+# from the character pack; env vars and a saved voice_eq.json override them.
 _voice_filter = CHARACTER.voice_filter
 VOICE_LPF_ENABLED = os.environ.get("VOICE_LPF_ENABLED", "1" if _voice_filter["enabled"] else "0") != "0"
 VOICE_LPF_CUTOFF = int(os.environ.get("VOICE_LPF_CUTOFF", str(_voice_filter["cutoff"])))   # Hz (try 4000–8000)
@@ -110,8 +110,6 @@ SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
 # UI Settings
 # Which face to show: "web" = the live three.js face in a local browser on top
 # of the window, "tk" = the PNG frames only.
-FACE_DISPLAY = os.environ.get("FACE_DISPLAY", "web")
-MIC_METER_ENABLED = True  # Show mic gain meter overlay during listening
 
 def t(key):
     """Get a spoken line from the character pack in the current language.

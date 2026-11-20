@@ -374,9 +374,12 @@ const POSE_KEYS = Object.keys(POSES);
 class Eased {
   constructor(value, speed) { this.value = value; this.target = value; this.velocity = 0; this.speed = speed; }
   step(dt) {
-    const k = this.speed * this.speed, c = 2 * this.speed;
-    this.velocity += (k * (this.target - this.value) - c * this.velocity) * dt;
-    this.value += this.velocity * dt;
+    // Small sub-steps: one big step overshoots and diverges once speed * dt nears 1 (30 fps, or a slow frame)
+    const k = this.speed * this.speed, c = 2 * this.speed, n = Math.ceil(this.speed * dt / 0.3) || 1;
+    for (let i = 0; i < n; i++) {
+      this.velocity += (k * (this.target - this.value) - c * this.velocity) * dt / n;
+      this.value += this.velocity * dt / n;
+    }
     return this.value;
   }
   snap() { this.value = this.target; this.velocity = 0; }
@@ -852,7 +855,7 @@ function connect() {
   source.onerror = () => note('Waiting for the engine…');
 }
 
-// Touch, as on the old display: tap = mute, 1.5 s = voice tuner, 5 s = shut down
+// Touch, as on the old display: tap = mute, 5 s = shut down
 function sendAction(type) {
   fetch('/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type }) }).catch(() => {});
 }
@@ -865,7 +868,7 @@ canvas.addEventListener('pointerup', () => {
     if (held < 600) stepPose(1);
     return;
   }
-  sendAction(held >= 5000 ? 'shutdown' : held >= 1500 ? 'long_press' : 'tap');
+  sendAction(held >= 5000 ? 'shutdown' : 'tap');
 });
 
 // ── Frame loop ───────────────────────────────────────────────────────────

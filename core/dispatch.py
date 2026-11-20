@@ -1,8 +1,6 @@
 """Stream action dispatch — consume ``Brain.stream_think()`` chunks and
 route JSON actions (camera, music, timer, expression, image) into
 callbacks or result flags.
-
-Extracted from the 200-line chunk-parsing loop inside ``BotGUI.main_loop``.
 """
 
 import json
@@ -22,7 +20,6 @@ class ActionResult:
     """Aggregated result of consuming a ``stream_think()`` generator."""
     take_photo: bool = False
     music_triggered: bool = False
-    voice_eq: bool = False
     timer_minutes: float | None = None     # set when a timer was started
     image_url: str | None = None
     speak_chunks: list[str] = field(default_factory=list)
@@ -106,15 +103,6 @@ def dispatch_stream(
                     result.music_triggered = True
                     if on_music:
                         on_music()
-                    chunk = chunk.replace(json_match.group(0), '').strip()
-
-                elif action == "voice_eq":
-                    # voice_eq is only valid from pre-LLM keyword detection
-                    # (which short-circuits before the LLM runs and yields
-                    # exactly one chunk).  If we've already seen other chunks,
-                    # the LLM is hallucinating — just strip the JSON silently.
-                    if not result.speak_chunks:
-                        result.voice_eq = True
                     chunk = chunk.replace(json_match.group(0), '').strip()
 
             except Exception as e:

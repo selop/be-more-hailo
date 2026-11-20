@@ -27,8 +27,8 @@ voice_eq = "voice_eq.json"
 wake_threshold = 0.35
 
 [voice]
-# Low-pass filter for the "tiny speaker" sound. The on-screen tuner saves
-# overrides to assets.voice_eq.
+# Low-pass filter for the "tiny speaker" sound. A saved assets.voice_eq file
+# overrides these.
 lpf_enabled = true
 lpf_cutoff = 4000
 lpf_order = 4
@@ -72,23 +72,6 @@ bubble_outline = "#2a6b3a"
 bubble_text = "#1a4a28"
 frame_inner = "#1c201a"
 frame_outer = "#38b5a0"
-
-[theme.tuner]
-# Voice tuner overlay palette.
-BG = "#3d6b3d"
-BORDER = "#7dff7d"
-INNER_BG = "#2d5a2d"
-LINE_CLR = "#7dff7d"
-DIM_CLR = "#4a8a4a"
-CURVE_CLR = "#ff3333"
-DOT_CLR = "#ff4444"
-SLIDER_TRACK = "#1a3a1a"
-SLIDER_FILL = "#7dff7d"
-SLIDER_THUMB = "#ffffff"
-BTN_BG = "#2d5a2d"
-BTN_OUTLINE = "#7dff7d"
-BTN_TEXT = "#7dff7d"
-BTN_OFF_BG = "#5a2d2d"
 
 [idle]
 # Topics searched for a spoken idle thought, and lines used when that fails.
@@ -226,10 +209,6 @@ timer_set = [
 timer_done = "Timer is up!"
 # Spoken when a timed reminder is due. Placeholder: ${message} ("call your mom").
 reminder = "BMO has a reminder for you: ${message}!"
-eq_open = "Opening BMO's voice tuner!"
-eq_close = "Closing BMO's voice tuner!"
-eq_test = "Hello! BMO is tuning their voice!"
-eq_title = "BMO VOICE TUNER"
 
 [lines.de]
 timer_set = [

@@ -11,12 +11,12 @@ Two rules shape the structure:
 
 | Domain | Problem it solves | Files |
 |---|---|---|
-| **Hearing** | Getting the user's words in: mic, wake word, endpointing, transcription | `core/audio_input.py`, `core/stt.py`, `core/meter.py`, `tests/test_wakeword.py`, `scripts/find_mic.py`, `scripts/list_devices.py`, `scripts/benchmark_stt.py` |
-| **Voice** | Getting speech and sounds out: synthesis, playback, voice filter | `core/tts.py`, `core/sounds.py`, `core/voice_eq.py`, `scripts/benchmark_tts.py` |
+| **Hearing** | Getting the user's words in: mic, wake word, endpointing, transcription | `core/audio_input.py`, `core/stt.py`, `tests/test_wakeword.py`, `scripts/find_mic.py`, `scripts/list_devices.py`, `scripts/benchmark_stt.py` |
+| **Voice** | Getting speech and sounds out: synthesis, playback, voice filter | `core/tts.py`, `core/sounds.py`, `scripts/benchmark_tts.py` |
 | **Brain** | What is said: conversation history, memory, web search | `core/llm.py`, `core/search.py`, `get_system_prompt()` in `core/config.py`, `scripts/benchmark_llm.py` |
 | **Intent** | Deciding what the user wants done and turning model output into actions | `core/actions.py`, `core/dispatch.py`, `core/timers.py`, `tests/test_timers.py` |
 | **NPU runtime** | Model lifecycle on the Hailo-10H: VDevice, load, release, VLM swap | `core/npu.py`, `core/camera.py`, `models/`, `scripts/hailo_detect.py` |
-| **Face** | What is shown: phase and expression state, animation, overlays, screensaver, the Tkinter shell | `core/state.py`, `core/animation.py`, `core/bubble.py`, `core/timer_clock.py`, `core/image_display.py`, `core/screensaver.py`, `agent_hailo.py`, `face/` (the live three.js face), `core/display_server.py`, `scripts/face_demo.py`, `tests/test_display.py` |
+| **Face** | What is shown: phase and expression state, animation, overlays, screensaver, the agent shell and live face | `core/state.py`, `core/image_display.py`, `core/screensaver.py`, `agent_hailo.py`, `face/` (the live three.js face), `core/display_server.py`, `scripts/face_demo.py`, `tests/test_display.py` |
 | **Conversation** | One turn end to end: listen, think, speak, act; plus speaking, timers, music | `core/turn.py`, `tests/test_turn.py` |
 | **Platform** | Install, services, deploy, settings, logging, the character loader | `setup.sh`, `setup_services.sh`, `start_agent.sh`, `requirements.txt`, `core/log.py`, `core/config.py`, `core/character.py`, `tests/test_character.py` |
 | **Character** (data, not code) | Who the assistant is | `characters/bmo/character.toml`, `sounds/`, `wakeword.onnx`, `generate_faces.py`, `scripts/generate_sounds.py`, `scripts/generate_chiptunes.py`, `scripts/convert_music.py` |
@@ -41,7 +41,7 @@ The engine loads the pack named by the `CHARACTER` setting (default `bmo`) throu
 | Voice | `voice.<language>`, the filter defaults, `voice.pronunciations`, `assets.sounds` |
 | Face | `face.*`, `theme.*`, `assets.faces` |
 | Intent | the name (for "sing for <name>"), `lines.timer_done`, `lines.empty_reply` |
-| Conversation | spoken lines for music, images and the voice tuner |
+| Conversation | spoken lines for music and images |
 
 BMO's faces, sounds and wake-word model still sit in their original folders; `[assets]` in the pack points at them. A new pack would keep its assets inside its own folder.
 
@@ -49,7 +49,7 @@ BMO's faces, sounds and wake-word model still sit in their original folders; `[a
 
 | Seam | Between | Contract today |
 |---|---|---|
-| Display | Conversation → Face | `core.turn.TurnUI`: `set_status`, `show_user_prompt`, `meter_feed`, `set_boot_frame`, `take_photo`, `voice_tuner_visible`, `open_voice_tuner`, `close_voice_tuner`, `show_image`. `BotGUI` implements it |
+| Display | Conversation → Face | `core.turn.TurnUI`: `set_status`, `show_user_prompt`, `meter_feed`, `set_boot_frame`, `take_photo`, `show_image`. `Agent` implements it |
 | Wake word and recording | Conversation → Hearing | `wait_for_wakeword(oww, stop_event, get_state, suppressed_states, ...)` and `record_until_silence(stop_event, meter_cb, ...)`; each opens its own mic stream. Conversation loads the wake-word model and decides when detection is suppressed |
 | Transcript | Hearing → Conversation | `transcribe_audio(path) -> str`; recording handed over as a WAV file on disk |
 | Routing | Intent ↔ Brain | `Brain` calls `detect_pre_llm_action_json()` and `needs_web_search()` before generating |
@@ -58,7 +58,7 @@ BMO's faces, sounds and wake-word model still sit in their original folders; `[a
 | Speech | Conversation → Voice | `Conversation.speak()` calls `get_synthesizer().synthesize(text)` then `get_player().play(pcm)`. Camera and screensaver speak through `Conversation.speak` |
 | Model handle | Brain → NPU runtime | `core/llm.py` imports private names from `core/npu.py` (`_get_llm`, `_prepare_prompt`, `_release_llm`, `_vlm_worker`) |
 | Shared device | Hearing ↔ NPU runtime | STT and LLM share one VDevice; `core/stt.py` imports the private `_get_vdevice` and `_resolve_hef`; `_release_llm()` calls `release_stt()` and `reload_after_vlm()` calls `init_stt()` |
-| Level meter | Hearing → Face | `meter_cb(vol)` in the recorder's loudness units; `MicMeter.VOL_MAX` in `core/meter.py` assumes that scale |
+| Level meter | Hearing → Face | `meter_cb(vol)` in the recorder's loudness units; `Agent.METER_MAX` in `agent_hailo.py` assumes that scale |
 | Phase | everyone → Face | `store.set_phase()` / `store.set_expression()`; see `docs/state-store.md`. `speak()` sets `SPEAKING` per sentence, not per reply |
 | Mic and speaker | Hearing ↔ Voice | No code contract. Wake word is suppressed while `Phase.SPEAKING` / `Phase.JAMMING` plus a 2 s cooldown. Sound effects and music play through `aplay`, a second output path outside `AudioPlayer` |
 
@@ -69,7 +69,7 @@ BMO's faces, sounds and wake-word model still sit in their original folders; `[a
 - `Conversation.speak()` is called from four threads (turn loop, timers, music, screensaver) with no queue between them.
 - Conversation still owns pieces of Hearing (wake-word model loading, suppression policy) and of Voice (the speak sequence); they moved out of the GUI but not yet into their domains.
 - Hearing and Voice share physical devices with only phase-based suppression between them, and the `aplay` path is not covered by it.
-- `TurnUI` methods are called from worker threads and touch Tkinter widgets directly, as the old loop did.
+- `TurnUI` methods are called from worker threads; `Agent` only publishes events to the face page from them.
 
 ## Still to do in the character split
 

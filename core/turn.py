@@ -5,7 +5,6 @@ together with the things that had no home before: speaking, timers, music
 and the thinking sounds. It has no Tkinter dependency. Whatever shows the
 turn on screen implements :class:`TurnUI` and is told what happened.
 
-Extracted from ``BotGUI.main_loop`` without behaviour changes.
 """
 
 import atexit
@@ -48,15 +47,6 @@ class TurnUI:
 
     def take_photo(self, user_text: str):
         """Run the camera flow for *user_text*."""
-
-    def voice_tuner_visible(self) -> bool:
-        return False
-
-    def open_voice_tuner(self):
-        """Show the voice tuner."""
-
-    def close_voice_tuner(self):
-        """Hide the voice tuner."""
 
     def show_image(self, image_url: str):
         """Download and display a generated image."""
@@ -316,8 +306,6 @@ class Conversation:
         return record_until_silence(
             self.stop_event,
             meter_cb=self.ui.meter_feed,
-            grace_sec=1.5,
-            timeout_sec=30.0,
             filename="input.wav",
         )
 
@@ -364,16 +352,6 @@ class Conversation:
 
         if result.take_photo:
             self.ui.take_photo(user_text)
-
-        if result.voice_eq:
-            if self.ui.voice_tuner_visible():
-                bmo_print("EQ", "Voice command closing voice EQ tuner")
-                self.speak(say("eq_close"))
-                self.ui.close_voice_tuner()
-            else:
-                bmo_print("EQ", "Voice command opening voice EQ tuner")
-                self.speak(say("eq_open"))
-                self.ui.open_voice_tuner()
 
         if result.image_url:
             self.speak(t("draw_image"))

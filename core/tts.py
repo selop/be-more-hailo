@@ -4,9 +4,8 @@ import os
 import re
 import json
 import threading
-import wave
 from .config import (
-    CHARACTER, PIPER_CMD, PIPER_MODEL, ALSA_DEVICE, PIPER_LENGTH_SCALE,
+    CHARACTER, PIPER_CMD, PIPER_MODEL, PIPER_LENGTH_SCALE,
     VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER,
     PRONUNCIATION_FILE, SOUNDS_DIR,
 )
@@ -264,17 +263,6 @@ def get_cached_path(filepath: str) -> str:
     if os.path.exists(cached):
         return cached
     return filepath
-
-
-def invalidate_cache():
-    """Delete all cached WAVs (called when EQ settings change)."""
-    if os.path.isdir(_cache_dir):
-        for f in os.listdir(_cache_dir):
-            try:
-                os.unlink(os.path.join(_cache_dir, f))
-            except OSError:
-                pass
-    logger.info("Voice sound cache invalidated")
 
 
 def _cached_path(filepath: str) -> str:

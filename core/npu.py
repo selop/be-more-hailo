@@ -11,7 +11,7 @@ import time
 
 import numpy as np
 
-from .config import CHARACTER, LLM_HEF_PATH, VLM_HEF_PATH, get_system_prompt
+from .config import CHARACTER, LLM_HEF_PATH, get_system_prompt
 from .actions import vlm_question, clean_llm_response
 
 logger = logging.getLogger(__name__)

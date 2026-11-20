@@ -28,7 +28,7 @@ The device defaults to `selop@raspi`; use `BMO_HOST=selop@bmo` for the SSD insta
 # Activate venv first
 source venv/bin/activate
 
-# On-device GUI (fullscreen Tkinter)
+# On-device agent (opens the live face in Chromium)
 ./start_agent.sh
 # or directly: python agent_hailo.py
 
@@ -73,7 +73,7 @@ agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──�
                          └── search.py       # DuckDuckGo web search integration
 ```
 
-- **`agent_hailo.py`** — Tkinter shell: window, touch input, face animation, overlays. Implements `core.turn.TurnUI`; the conversation loop itself is `core.turn.Conversation`
+- **`agent_hailo.py`** — `Agent`: builds the engine, connects it to the live face (the only display), handles touch and the idle-to-screensaver timer. Implements `core.turn.TurnUI`; the conversation loop itself is `core.turn.Conversation`
 - **`characters/bmo/`** — BMO's character pack. The engine (`core/`, `agent_hailo.py`, `cli_chat.py`) must stay character-neutral: no names, lines or prompts as string literals. `tests/test_character.py` enforces this
 - **`core/`** — Shared modules used by the GUI and `cli_chat.py`. `npu.py` owns all Hailo hardware interaction, `actions.py` and `dispatch.py` are pure-function modules testable without NPU hardware
 
@@ -92,11 +92,11 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 ### Key Design Patterns
 
 - **State store (`core/state.py`)**: Centralized `StateStore` separates *phase* (what BMO is doing: `Phase.IDLE`, `Phase.SPEAKING`, etc.) from *expression* (what face to display: `"happy"`, `"detective"`, etc.). Phase changes are thread-safe with hooks; expressions change independently. Use `store.set_phase()` for phase transitions, `store.set_expression()` for face-only changes. See `docs/state-store.md` for full design and `/use-state-store` skill for implementation guidance.
-- **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes. Requests the small model does not handle reliably are recognised before the LLM in `core/actions.py`: camera, image, music, voice tuner (keywords) and timers/reminders (`core/timers.py`)
+- **LLM action dispatch**: LLM outputs JSON on its own line (`{"action": "set_expression", "value": "happy"}`, `{"action": "set_timer", ...}`, `{"action": "play_music"}`, `{"action": "take_photo"}`) which the agent parses and executes. Requests the small model does not handle reliably are recognised before the LLM in `core/actions.py`: camera, image, music (keywords) and timers/reminders (`core/timers.py`)
 - **Sentence-streaming TTS**: Response is split sentence-by-sentence; TTS plays each sentence as LLM continues generating
 - **System prompt caching**: `llm.save_context()` / `llm.load_context()` caches system prompt KV state at startup — not re-processed every turn
 - **Turn loop outside the GUI**: `core.turn.Conversation` runs boot and the turn loop on a worker thread and reports to the display through the `TurnUI` callbacks; it owns `speak()`, timers and music
-- **Timer clock**: `Conversation.active_timers()` lists running timers; `core/timer_clock.py` polls it from the Tk loop and draws the countdown, so no worker thread touches the widget
+- **Timer clock**: `Conversation.active_timers()` lists running timers; `StateMirror` publishes them and the face page draws the countdown
 - **Wake word suppression**: Wake word detection is suppressed during `Phase.SPEAKING` and `Phase.JAMMING` to prevent BMO's own audio from triggering false detections
 - **Pronunciation system**: User corrects pronunciation → LLM appends `!PRONOUNCE: word=phonetic` → saved to `pronunciations.json` → Piper substitutions
 - **VLM subprocess swap**: Main process releases STT+LLM+VDevice → forks child → child loads VLM → inference → child exits → parent reloads LLM+STT+system prompt cache
@@ -105,7 +105,7 @@ LLM + Speech2Text coexist on a shared VDevice (`group_id="SHARED"`) because Whis
 ### Adding New Face States
 
 Faces are drawn live by `face/index.html`; there are no image frames.
-1. Add the name to `characters/bmo/character.toml` under `[face]`: `expressions` (emotion faces the LLM may request), `personas` (screensaver gags) or `screensaver`. `core/state.py` builds `VALID_EXPRESSIONS`, `PERSONA_EXPRESSIONS` and `ALL_EXPRESSION_NAMES` from the pack.
+1. Add the name to `characters/bmo/character.toml` under `[face]`: `expressions` (emotion faces the LLM may request), `personas` (screensaver gags) or `screensaver`. `core/state.py` builds `VALID_EXPRESSIONS` and `PERSONA_EXPRESSIONS` from the pack.
 2. Add a pose with the same name to `POSES` in `face/index.html`: eye and mouth shape weights, a few numbers (`dotR`, `slant`, `eyeY`, `open`, …) and motion flags (`bounce`, `droop`, `tremble`, `pulse`, `gaze`).
 3. If the face needs something that is not an eye or a mouth (a hat, a bee, microphones), add a function to `PROPS` and name it in the pose's `prop`. Props are painted on the canvas layer in face pixels (800×480) and get the time since the pose began.
 4. Only add a new shape to the shader when the existing eye and mouth shapes cannot express it.
@@ -122,14 +122,14 @@ Faces are drawn live by `face/index.html`; there are no image frames.
 
 ### Live Face
 
-The face is a web page (`face/index.html`, three.js, CRT tube shader) shown by Chromium in kiosk mode on top of the Tkinter window. `core/display_server.py` serves it on 127.0.0.1:8765 and streams engine events to it (`/events`); touches come back through `POST /action`.
+The face is a web page (`face/index.html`, three.js, CRT tube shader) shown by Chromium in kiosk mode. It is the only display; there is no Tkinter window. `core/display_server.py` serves it on 127.0.0.1:8765 and streams engine events to it (`/events`); touches come back through `POST /action`.
 
 - All 27 faces are poses in `POSES` in `face/index.html`. Eyes and mouth are drawn by the shader, so any pose blends into any other; props (microphones, camera, hat, bee, …) are painted live on a 2D canvas (`PROPS`).
 - The speech bubble, status line, mic meter, timer clock, mute label and pictures are painted on a 2D canvas that the shader lays over the face, so they sit inside the tube too.
 - The mouth follows the loudness of the audio being played (`speak` event, built by `speech_envelope()`).
-- The Tkinter window still runs underneath (touch handling, voice tuner, camera flow). Without the page it shows only the face colour and the status line: the old PNG frames are gone.
+- `Agent.run()` restarts Chromium if it exits (at most once per 30 s).
 - Tinker on a laptop with `python scripts/face_demo.py` (fake events) or by opening `face/index.html` as a file (demo buttons). Still frames: `?freeze=1&pose=happy&fx=0`.
-- The voice tuner has no live-face version yet; a long press does nothing there.
+- Touch: a tap mutes, a 5 s press shuts down. The voice tuner was removed with the Tkinter display; a saved `voice_eq.json` still applies.
 
 ### Observability
 
@@ -152,7 +152,7 @@ All configuration lives in `core/config.py`. Key settings:
 - `ALSA_DEVICE` — Speaker output device (override with `ALSA_DEVICE` env var)
 - `MIC_DEVICE_INDEX` — sounddevice input index
 - `WAKE_WORD_THRESHOLD` — Wake word sensitivity (default 0.35)
-- `SILENCE_THRESHOLD` — Mic silence detection level (override with `SILENCE_THRESHOLD` env var)
+- End of speech is decided by `Endpointer` in `core/audio_input.py`: speech is anything above twice the room's measured noise floor; a recording ends 0.9 s after speech stops, after 4 s without speech, or at 15 s
 - `get_system_prompt()` — fills the character pack's `prompts.system` with time, date and language rule
 - `CHARACTER` — the active character pack; set the `CHARACTER` env var to choose one (default `bmo`)
 
