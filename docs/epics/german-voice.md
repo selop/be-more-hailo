@@ -1,6 +1,6 @@
 # BMO understands and speaks German
 
-Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: in progress
+Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: blocked (the user has to listen: steps 3 and 7)
 
 German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-to-text language and a "respond only in German" rule. The gaps are below.
 
@@ -23,9 +23,9 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 5 | German keywords for photo, picture, music and web search, next to the English ones in `core/actions.py` (moving them into the pack was dropped: nothing needs it yet) | 2 | Tests: "Mach ein Foto", "Spiel ein Lied", "Mal mir ein Bild von einer Katze", "Wie wird das Wetter morgen in Berlin?" each take the right route | done (this commit) |
 | 6 | Translate the seven lines missing from `[lines.de]` (`confused_reset`, `empty_reply`, `stream_error`, `think_error`, `vision_error`, `vision_missing`, `vision_timeout`) | – | A test fails when a key in `[lines.en]` has no German line | done (this commit) |
 | 7 | Pronunciation fixes per language (the saved file maps "bmo" to "beemo", wrong for a German voice); German misheard spellings in `heard_as` | 3 | The name is spoken correctly in a German `make say` turn; the user confirms | todo |
-| 8 | German system prompt with German date and time, instead of one "answer in German" sentence | D2 | Five German `make say` questions get German answers in character; traces in the Log | todo |
+| 8 | German system prompt with German date and time, instead of one "answer in German" sentence | D2 | Five German `make say` questions get German answers in character; traces in the Log | done (see git log) |
 | 9 | German vision, search-summary and idle prompts, idle topics and stock phrases | 8 | A German photo turn and a forced screensaver thought are in German | todo |
-| 10 | German refusal phrases in the stuck-loop detection (`core/llm.py`) | 8 | A test with a German refusal resets the history | todo |
+| 10 | German refusal phrases in the stuck-loop detection (`core/llm.py`) | 8 | A test with a German refusal resets the history | done (see git log) |
 | 11 | German sound clips (`greeting_sounds_de`, `ack_sounds_de`, `thinking_sounds_de`) in the chosen voice | 3 | The clips exist in the repository and play in German mode | todo |
 | 12 | Reminder rewrite for German, or skipped in German | 4 | A German reminder is spoken back naturally; test | done (this commit) |
 | 13 | Rollout: `BMO_LANGUAGE=de` in the Pi's service file, clear `sounds/.cache`, restart | 3–12 | The German test script (timer, reminder, photo, music, weather, small talk) passes through `make say`; the user has listened | todo |
@@ -33,6 +33,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 15 | Tests force the local model (a device `.env` with `LLM_BACKEND=cloud` made the brain tests call the real API) | – | `make pi-test` passes on a Pi configured for the hosted model | done 84e4eb1 |
 | 16 | An action's JSON is never cut in two by the sentence splitter | – | Test `test_action_json_after_a_blank_line_is_not_cut_in_two`; a hosted-model turn with an action speaks no JSON | done 84e4eb1 |
 | 17 | A blank line in the reply ends the chunk before it, instead of flushing whatever follows word by word ("Yay," was spoken alone) | 16 | Test: JSON, blank line, then a sentence gives the sentence as one chunk | done (this commit) |
+| 18 | A dot after a digit does not end a spoken chunk ("der 20." / "November 2026." were spoken apart) | 8 | Test `test_german_date_is_not_cut_at_the_ordinal_dot`; a German date turn on the Pi is spoken in one piece | done (this commit) |
 
 ## Log
 
@@ -53,3 +54,12 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 - 2026-11-20, step 5: on the Pi "Spiel ein Lied für mich" took the music route and "Wie wird das Wetter morgen in Berlin?" ran a web search and was answered in German by the hosted model; "Guten Morgen, wie geht es dir heute?" took no shortcut. Photo and picture were checked by test only (a photo turn unloads the models; the picture service was refusing requests earlier).
   - Seen on the way, not part of this epic: a `--quiet` music turn says "no songs loaded" because mute is treated as no music; lines spoken by the music thread land in the next turn's trace; the weather search returned a stale-looking result (22 degrees in November).
 - 2026-11-20, step 12: possessives and "mich"/"mir" in a German reminder are turned round ("meine mutter anzurufen" becomes "deine ..."); "ich" is left alone. Test only; heard on the device with step 13.
+- 2026-11-20, steps 8 and 10: the Pi's service now runs with `BMO_LANGUAGE=de` (changed in `/etc/systemd/system/bmo-gui.service`; `sounds/.cache` cleared; the log shows the ramona-low voice loading). Five German turns through the hosted model, all answered in German and in character:
+  - "Wie spät ist es und welcher Tag ist heute?": "Es ist gerade 14:20 Uhr, und heute ist Freitag, der 20. November 2026." (correct; first audio after 2.6 s)
+  - a robot joke with a `set_expression` action and no spoken JSON (6.6 s), "Die Hauptstadt von Frankreich ist Paris!" (1.3 s), "Wer bist du?" (1.5 s)
+  - "Stell einen Timer auf 4 Sekunden": keyword route, confirmed with the German line "Timer läuft! ... sagt in 4 Sekunden Bescheid."
+  - The system prompt's instructions stayed in English; only the date, time and language rule are German. A full translation was not needed for the hosted model.
+  - Step 10 is covered by `test_german_refusal_resets_the_history` only; no refusal was provoked on the device.
+- 2026-11-20, step 18: the date above was spoken as "… der 20." and "November 2026." in two chunks; fixed and tested.
+- Open for the user's ear (steps 3 and 7): the ramona-low voice at speed 1.4 through the speaker filter, and the name: the saved pronunciation turns "BMO" into "beemo", which the German voice reads its own way.
+- Not measured yet: the user's own German through BMO's microphone.

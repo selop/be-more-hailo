@@ -179,6 +179,11 @@ def test_german_refusal_resets_the_history():
     assert len(brain.history) == 3
 
 
+def test_german_date_is_not_cut_at_the_ordinal_dot():
+    _, chunks = stream("Heute ist Freitag, der 20. November 2026. Schönen Tag!")
+    assert [c.strip() for c in chunks] == ["Heute ist Freitag, der 20. November 2026.", "Schönen Tag!"]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

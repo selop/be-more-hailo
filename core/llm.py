@@ -6,6 +6,7 @@ cleaning live in ``core.actions``.  This module ties them together.
 
 import contextlib
 import logging
+import re
 import time
 
 from . import cloud_llm, trace
@@ -210,7 +211,9 @@ class Brain:
                         # A blank line ends the chunk before it; what follows starts the next one
                         buffer, carry = buffer.rsplit("\n\n", 1)
                         buffer += "\n\n"
-                    if not in_json and any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']):
+                    # "der 20. November": a dot after a one- or two-digit number is an ordinal, not the end of a sentence
+                    after_digit = re.search(r"(?<!\d)\d{1,2}\.$", buffer) is not None
+                    if not in_json and not after_digit and any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']):
                         cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
                         out_chunk = "" if tag_seen else CHARACTER.normalize_name(cleaned)
                         tag_seen = tag_seen or strip_pronunciation_tag(buffer) != buffer.strip()
