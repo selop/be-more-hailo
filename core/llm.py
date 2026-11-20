@@ -10,7 +10,7 @@ import re
 import time
 
 from . import cloud_llm, trace
-from .config import CHARACTER, LLM_BACKEND, get_system_prompt, say
+from .config import CHARACTER, LANGUAGE_NAME, LLM_BACKEND, get_system_prompt, say
 from .tts import add_pronunciation
 from .search import search_web
 from .log import bmo_print
@@ -62,6 +62,21 @@ _REFUSAL_PATTERNS = [
 _name = CHARACTER.name.lower()
 _REFUSAL_PATTERNS += [f"please allow {_name} to respond", f"i'm not {_name}", f"i am not {_name}",
                       f"ich bin nicht {_name}"]
+
+
+def _retell_in_language(text: str) -> str:
+    """The local vision model only writes usable English (in German it
+    produced fragments). In another language the hosted model retells its
+    description; without the hosted model the English text is returned."""
+    if LANGUAGE_NAME == "English" or LLM_BACKEND != "cloud":
+        return text
+    try:
+        system = (f"Retell the user's text in {LANGUAGE_NAME}, in the first person, keeping its short "
+                  "and friendly tone. Output only the retelling.")
+        return "".join(cloud_llm.stream([{"role": "user", "content": text}], system=system)).strip() or text
+    except Exception as e:  # noqa: BLE001
+        bmo_print("LLM", f"Could not retell the description ({e!r})")
+        return text
 
 
 def _reply_tokens(history):
@@ -325,7 +340,7 @@ class Brain:
 
             logger.info(f"VLM response ({len(content)} chars): {content[:120]}...")
             self.history.append({"role": "assistant", "content": content})
-            return content
+            return _retell_in_language(content)
 
         except Exception as e:
             logger.error(f"VLM Exception: {e}", exc_info=True)

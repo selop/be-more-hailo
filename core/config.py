@@ -16,6 +16,7 @@ CHARACTER = get_character()
 # Language — switch the voice and LLM output language
 # Supported: "en" (English, default), "de" (German)
 LANGUAGE = os.environ.get("BMO_LANGUAGE", "en")
+LANGUAGE_NAME = {"de": "German"}.get(LANGUAGE, "English")     # as written into prompts
 
 # LLM HEF — direct NPU inference via hailo_platform.genai.LLM (no hailo-ollama needed)
 LLM_HEF_PATH = os.environ.get("LLM_HEF_PATH", "./models/Qwen2.5-1.5B-Instruct.hef")

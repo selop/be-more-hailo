@@ -60,8 +60,7 @@ class Character:
         self.screensaver_faces: list[str] = list(face.get("screensaver", []))
 
         idle = data.get("idle", {})
-        self.search_topics: list[str] = list(idle.get("search_topics", []))
-        self.fallback_phrases: list[str] = list(idle.get("fallback_phrases", []))
+        self._idle = idle
 
         self.theme: dict = dict(data["theme"])
         self.wake_threshold: float | None = data.get("hearing", {}).get("wake_threshold")
@@ -141,6 +140,11 @@ class Character:
             "cutoff": int(voice.get("lpf_cutoff", 4000)),
             "order": int(voice.get("lpf_order", 4)),
         }
+
+    def idle_list(self, key: str, language: str = "en") -> list[str]:
+        """``search_topics`` or ``fallback_phrases`` for the screensaver, in
+        *language* when the pack has them, otherwise the general ones."""
+        return list(self._idle.get(language, {}).get(key) or self._idle.get(key, []))
 
     def default_pronunciations(self, language: str = "en") -> dict:
         """Spelling fixes for the voice of *language*; a language without its

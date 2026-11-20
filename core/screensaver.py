@@ -11,7 +11,8 @@ import subprocess
 import time
 
 from .actions import clean_llm_response
-from .config import ALSA_DEVICE, CHARACTER, SOUNDS_DIR
+from . import cloud_llm
+from .config import ALSA_DEVICE, CHARACTER, LANGUAGE, LANGUAGE_NAME, LLM_BACKEND, SOUNDS_DIR
 from .log import bmo_print
 from .search import search_web
 from .state import Phase
@@ -31,12 +32,18 @@ def generate_thought(search_result, get_llm):
     Returns the thought string, or None on failure.
     """
     messages = [
-        {"role": "system", "content": CHARACTER.prompt("idle_system")},
-        {"role": "user", "content": CHARACTER.prompt("idle_thought", info=search_result[:1200])},
+        {"role": "system", "content": CHARACTER.prompt("idle_system", language=LANGUAGE_NAME)},
+        {"role": "user", "content": CHARACTER.prompt("idle_thought", info=search_result[:1200], language=LANGUAGE_NAME)},
     ]
     try:
-        llm = get_llm()
-        content = llm.generate_all(prompt=messages, temperature=0.8, max_generated_tokens=300)
+        content = None
+        if LLM_BACKEND == "cloud":
+            try:
+                content = "".join(cloud_llm.stream(messages[1:], system=messages[0]["content"]))
+            except Exception as e:  # noqa: BLE001 - any cloud failure means: think locally
+                bmo_print("SCREENSAVER", f"Cloud model failed ({e!r}); using the local model")
+        if not content:
+            content = get_llm().generate_all(prompt=messages, temperature=0.8, max_generated_tokens=300)
         content = clean_llm_response(content)
         if content and "connect" not in content.lower() and "error" not in content.lower():
             return content
@@ -152,7 +159,7 @@ class Screensaver:
 
         if self.get_llm() is not None:
             try:
-                topic = random.choice(CHARACTER.search_topics)
+                topic = random.choice(CHARACTER.idle_list("search_topics", LANGUAGE))
                 bmo_print("SCREENSAVER", f"Searching for: {topic}")
                 search_result = search_web(topic)
 
@@ -180,7 +187,7 @@ class Screensaver:
             bmo_print("SCREENSAVER", "LLM server not reachable, skipping thought")
 
         if not phrase:
-            phrase = random.choice(CHARACTER.fallback_phrases)
+            phrase = random.choice(CHARACTER.idle_list("fallback_phrases", LANGUAGE))
             bmo_print("SCREENSAVER", f"Fallback: {phrase}")
 
         if self.store.phase == Phase.SCREENSAVER:

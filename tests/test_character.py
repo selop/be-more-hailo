@@ -59,9 +59,10 @@ def test_every_pack_loads():
         # Every placeholder the engine fills must be accepted
         assert c.prompt("system", time="10:00 AM", date="Monday", language_rule="RULE ")
         assert c.prompt("live_data", user_text="hi")
-        assert c.prompt("idle_thought", info="fact")
-        for key in ("vision", "search_summary", "idle_system"):
-            assert c.prompt(key)
+        assert "German" in c.prompt("idle_thought", info="fact", language="German")
+        assert c.prompt("vision") and "German" in c.prompt("idle_system", language="German")
+        assert c.idle_list("fallback_phrases", "xx") == c.idle_list("fallback_phrases")
+        assert c.prompt("search_summary")
 
 
 def live_poses():

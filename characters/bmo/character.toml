@@ -101,6 +101,31 @@ fallback_phrases = [
     "Football... is a tough little guy.",
 ]
 
+[idle.de]
+search_topics = [
+    "interessanter Fakt des Tages",
+    "Zitat des Tages",
+    "Wettervorhersage heute",
+    "heute in der Geschichte",
+    "spannende Entdeckung der Wissenschaft diese Woche",
+    "lustiger Fakt über Tiere",
+    "Gedanke des Tages",
+    "schöne Nachricht des Tages",
+    "Fakt aus der Geschichte der Videospiele",
+    "kurioser Fakt über Essen",
+    "Rätsel des Tages",
+    "Adventure Time Wissenswertes",
+    "Astronomie Bild des Tages",
+    "Witz des Tages",
+]
+fallback_phrases = [
+    "Was Finn und Jake wohl gerade machen?",
+    "Möchte jemand ein Videospiel spielen? Nein? ...Okay.",
+    "La la la la la... BMO ist am besten!",
+    "Manchmal summt BMO einfach gern ein kleines Lied.",
+    "Football... ist ein tapferer kleiner Kerl.",
+]
+
 [prompts]
 # Main system prompt. Placeholders: ${time}, ${date}, ${language_rule}.
 system = """\
@@ -142,7 +167,7 @@ If you want to play a song or the user asks you to sing/play music, you MUST out
 {"action": \
 "play_music"} This will automatically trigger your internal chiptune synthesizers and start your dancing animation!"""
 
-# System prompt for the vision model.
+# System prompt for the vision model. It stays English: the local vision model cannot write other languages.
 vision = "You are BMO, a helpful robot assistant. Describe what you see concisely and conversationally in English."
 
 # System prompt for summarising a web search the LLM asked for.
@@ -151,8 +176,8 @@ search_summary = "Summarize this search result in one short, conversational sent
 # Instruction appended after injected live search data. Placeholder: ${user_text}.
 live_data = "Using only the above live data, answer in one or two sentences as BMO: ${user_text}"
 
-# Idle thoughts spoken by the screensaver. idle_thought placeholder: ${info}.
-idle_system = "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts."
+# Idle thoughts spoken by the screensaver. Placeholders: ${language}; idle_thought also ${info}.
+idle_system = "You are BMO, a cute little robot who muses to yourself. Always mention specific names, titles, numbers, and facts. Speak ${language}."
 idle_thought = """\
 You are BMO, a cute little robot. You just learned something interesting from the real world. \
 Based on the info below, share what you found OUT LOUD. RULES:\n1. \
@@ -170,7 +195,7 @@ Because he was outstanding in his field! \
 Hehe, BMO loves that one.'\n\nIf the topic is highly visual (like a nebula, space photo, or cute animal), generate an image using this EXACT JSON format anywhere in your response: \
 {"action": "display_image", "image_url": \
 "https://image.pollinations.ai/prompt/URL_ENCODED_SUBJECT?width=512&height=512&nologo=true"}. \
-Do NOT use JSON unless you are creating an image.\n\nInfo: ${info}"""
+Do NOT use JSON unless you are creating an image.\n\nSay it in ${language}.\n\nInfo: ${info}"""
 
 # Spoken lines. A list means one is picked at random. Languages other than
 # "en" fall back to the English line when a key is missing.

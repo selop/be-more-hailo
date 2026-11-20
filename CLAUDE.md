@@ -160,7 +160,7 @@ All configuration lives in `core/config.py`. Key settings:
 - `LLM_BACKEND` — `local` (default, the NPU model) or `cloud` (Claude through `core/cloud_llm.py`; needs `ANTHROPIC_API_KEY`). With `cloud`, the user's words and the history leave the device; if the call fails before any text arrives, the local model answers that turn. The hosted model is `CLOUD_LLM_MODEL` in `core/config.py`. Vision, speech-to-text, the wake word and the screensaver's idle thoughts stay local
 - `CHARACTER` — the active character pack; set the `CHARACTER` env var to choose one (default `bmo`)
 
-Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `BMO_LANGUAGE` (en/de).
+Optional env vars: `GEMINI_API_KEY` (for Gemini integration), `BMO_LANGUAGE` (en/de), `LLM_BACKEND` (local/cloud) with `ANTHROPIC_API_KEY`.
 
 ## Deployment
 
@@ -173,6 +173,6 @@ rsync -avz --relative core/config.py core/tts.py agent_hailo.py selop@raspi:~/Gi
 
 - BMO is genderless — use they/them, never he/she
 - BMO's personality is defined in `prompts.system` in `characters/bmo/character.toml` — keep responses warm, short (2-4 sentences), with occasional third-person self-reference
-- LLM must respond only in English regardless of input language
+- The spoken language is set with `BMO_LANGUAGE` (`en` default, `de` German). German mode: the `thorsten-high` Piper voice, German lines and sound clips (`sounds/*_de`, made by `scripts/generate_sounds.py`), per-language pronunciation fixes, German timers and keywords (recognised next to the English ones in every mode). German replies need the hosted model (`LLM_BACKEND=cloud`): the local 1.5B model and the local vision model do not write usable German. See `docs/epics/german-voice.md`
 - External APIs used: DuckDuckGo (no key), Pollinations.ai (image gen, no key), optional Gemini (key required)
 - Hardware target is Raspberry Pi 5 + Hailo-10H — keep code compatible with ARM64/Bookworm

@@ -25,8 +25,9 @@ def _words(pieces):
         yield pending
 
 
-def stream(history):
-    """Yield the reply to *history* word by word. Raises on any failure."""
+def stream(history, system=None):
+    """Yield the reply to *history* word by word, under *system* (default: the
+    character's main prompt). Raises on any failure."""
     global _client
     import anthropic                # only needed when the cloud backend is on
     if _client is None:
@@ -41,7 +42,7 @@ def stream(history):
     with _client.messages.stream(
         model=CLOUD_LLM_MODEL,
         max_tokens=4096,
-        system=get_system_prompt(),             # built per turn, so the time and date in it are current
+        system=system or get_system_prompt(),   # built per turn, so the time and date in it are current
         thinking={"type": "disabled"},          # a spoken reply: first word fast, fewest tokens
         output_config={"effort": "low"},
         messages=messages,

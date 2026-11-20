@@ -440,7 +440,7 @@ def test_screensaver_speaks_one_stock_line_when_the_model_is_not_loaded():
     from core.config import CHARACTER
     before = time.time()
     did, saver = screensaver_tick([0.5, 0.5, 0.01])        # no face, no gag, a spoken thought
-    assert did == [("spoke", sorted(CHARACTER.fallback_phrases)[0]), "screensaver"]
+    assert did == [("spoke", sorted(CHARACTER.idle_list("fallback_phrases"))[0]), "screensaver"]
     assert saver.last_audio_time > before + 3000           # stamped, so the next thought waits
 
 

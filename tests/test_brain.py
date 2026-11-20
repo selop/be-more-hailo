@@ -184,6 +184,23 @@ def test_german_date_is_not_cut_at_the_ordinal_dot():
     assert [c.strip() for c in chunks] == ["Heute ist Freitag, der 20. November 2026.", "Schönen Tag!"]
 
 
+def test_photo_description_is_retold_in_the_spoken_language():
+    saved = (llm.LLM_BACKEND, llm.LANGUAGE_NAME, llm.cloud_llm.stream)
+    try:
+        llm.LLM_BACKEND, llm.LANGUAGE_NAME = "cloud", "German"
+        llm.cloud_llm.stream = lambda history, system=None: iter(["Ich sehe", " eine Tasse."])
+        assert llm._retell_in_language("I see a cup.") == "Ich sehe eine Tasse."
+
+        def offline(history, system=None):
+            raise ConnectionError("no network")
+        llm.cloud_llm.stream = offline
+        assert llm._retell_in_language("I see a cup.") == "I see a cup."         # keeps the English text
+        llm.LLM_BACKEND = "local"
+        assert llm._retell_in_language("I see a cup.") == "I see a cup."
+    finally:
+        llm.LLM_BACKEND, llm.LANGUAGE_NAME, llm.cloud_llm.stream = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
