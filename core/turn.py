@@ -336,6 +336,9 @@ class Conversation:
     def wait_for_wakeword(self, oww):
         if not self._injections.empty():
             return True
+        if self.store.phase == Phase.ERROR:
+            # Coming back after a failed wait (no microphone audio): try again with a normal face
+            self.store.set_phase(Phase.IDLE, msg="Ready...")
         suppressed = {Phase.SPEAKING.value, Phase.JAMMING.value, Phase.LISTENING.value}
         # Suppress for 2s after last speech so the character's own audio does not false-trigger
         post_speech_cooldown = lambda: (time.time() - self.store.last_spoke_at) < 2.0

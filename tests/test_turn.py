@@ -493,34 +493,74 @@ def test_following_sentences_are_synthesised_while_the_first_one_plays():
         assert plays[0] == 3, events             # by the end of the first sentence, all three were ready
 
 
-def test_recorder_gives_up_when_the_microphone_delivers_nothing():
+class FakeMicStream:
+    """Stands in for sounddevice.InputStream: silent (reads block) or live (reads return quiet audio)."""
+    live = False
+
+    def __init__(self, **kwargs):
+        self.closed = threading.Event()
+
+    def start(self):
+        pass
+
+    def read(self, frames):
+        import numpy as np
+        if not FakeMicStream.live:
+            self.closed.wait()
+            raise RuntimeError("stream closed")
+        self.closed.wait(0.002)
+        return np.zeros((frames, 1), dtype=np.int16), False
+
+    def abort(self):
+        self.closed.set()
+
+    def close(self):
+        self.closed.set()
+
+
+class FakeSoundDevice:
+    InputStream = FakeMicStream
+
+
+def with_fake_microphone(live, fn):
     from core import audio_input
-
-    class SilentStream:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    class FakeSoundDevice:
-        InputStream = SilentStream
-
-        @staticmethod
-        def sleep(ms):
-            time.sleep(ms / 1000)
-
     saved = (audio_input.sd, audio_input.STALL_GRACE_SEC)
     audio_input.sd, audio_input.STALL_GRACE_SEC = FakeSoundDevice, 0.1
+    FakeMicStream.live = live
     try:
-        started = time.time()
-        assert audio_input.record_until_silence(threading.Event(), max_sec=0.1) is None
-        assert time.time() - started < 2
+        return fn(audio_input)
     finally:
         audio_input.sd, audio_input.STALL_GRACE_SEC = saved
+
+
+def test_recorder_gives_up_when_the_microphone_delivers_nothing():
+    started = time.time()
+    assert with_fake_microphone(False, lambda a: a.record_until_silence(threading.Event())) is None
+    assert time.time() - started < 2
+
+
+def test_recorder_ends_by_itself_on_a_live_quiet_microphone():
+    # Quiet audio and nobody speaks: over after the no-speech limit, in audio time
+    started = time.time()
+    assert with_fake_microphone(True, lambda a: a.record_until_silence(threading.Event())) is None
+    assert time.time() - started < 5
+
+
+def test_wake_word_wait_notices_a_silent_microphone_and_hears_a_live_one():
+    class Model:
+        prediction_buffer = {"wakeword": [0.0]}
+
+        def predict(self, audio):
+            Model.prediction_buffer = {"wakeword": [0.9]}
+
+        def reset(self):
+            pass
+
+    wait = lambda a: a.wait_for_wakeword(Model(), threading.Event(), lambda: "idle", set())
+    started = time.time()
+    assert with_fake_microphone(False, wait) is False        # silent: gives up, the caller reopens
+    assert time.time() - started < 2
+    assert with_fake_microphone(True, wait) is True          # audio flows: detected
 
 
 if __name__ == "__main__":

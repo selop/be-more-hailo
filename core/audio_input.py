@@ -1,6 +1,7 @@
 """Microphone recording and wake-word detection."""
 
-import time
+import queue
+import threading
 import wave
 import logging
 
@@ -14,6 +15,54 @@ from .config import MIC_DEVICE_INDEX, MIC_SAMPLE_RATE, WAKE_WORD_THRESHOLD
 from .log import bmo_print
 
 logger = logging.getLogger(__name__)
+
+
+class Microphone:
+    """Microphone audio in blocks of *block_frames*, handed over through a queue.
+
+    A reader thread does blocking reads, which deliver every sample. (A
+    callback stream with a pinned block size delivered 9.5 instead of 12.5
+    blocks per second on the device: a quarter of the audio was lost.) The
+    consumer waits with a timeout, so a stream that goes silent is noticed
+    instead of blocking forever.
+    """
+
+    def __init__(self, block_frames: int):
+        self.block_frames = block_frames
+        self._blocks = queue.Queue(maxsize=200)
+        self._stop = threading.Event()
+        self._stream = None
+
+    def __enter__(self):
+        self._stream = sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16')
+        self._stream.start()
+        threading.Thread(target=self._read, daemon=True).start()
+        return self
+
+    def _read(self):
+        try:
+            while not self._stop.is_set():
+                data, _ = self._stream.read(self.block_frames)
+                try:
+                    self._blocks.put_nowait(data)
+                except queue.Full:
+                    pass        # the consumer is behind; the oldest audio is what it still holds
+        except Exception as e:  # noqa: BLE001 - the stream was closed under us or the device failed
+            if not self._stop.is_set():
+                bmo_print("AUDIO", f"Microphone read failed: {e!r}")
+
+    def get(self, timeout: float):
+        """Next block; raises ``queue.Empty`` when none arrives within *timeout* seconds."""
+        return self._blocks.get(timeout=timeout)
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        for close in (self._stream.abort, self._stream.close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 - a stalled device may refuse; the reader thread is a daemon
+                pass
+        return False
 
 
 # Score of the most recent wake-word detection (read by the turn trace)
@@ -49,9 +98,16 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
     downsample_factor = capture_rate // target_rate
 
     try:
-        with sd.InputStream(samplerate=capture_rate, device=MIC_DEVICE_INDEX, channels=1, dtype='int16') as stream:
+        with Microphone(CHUNK * downsample_factor) as mic:
             while not stop_event.is_set():
-                data, _ = stream.read(CHUNK * downsample_factor)
+                try:
+                    data = mic.get(timeout=STALL_GRACE_SEC)
+                except queue.Empty:
+                    bmo_print("AUDIO", f"No microphone audio for {STALL_GRACE_SEC:.0f} s; reopening the stream")
+                    trace.event("mic_stalled", where="wake")
+                    if interrupt_fn and interrupt_fn():
+                        return True         # an injected test turn does not need the microphone
+                    return False            # the caller comes back and the stream is opened afresh
                 # Filtered resampling: plain decimation folds noise above 8 kHz (the fan) into the speech band
                 audio_16k = np.clip(resample_poly(data[:, 0].astype(np.float32), 1, downsample_factor), -32768, 32767).astype(np.int16)
 
@@ -84,7 +140,7 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
 
 
 BLOCK_SEC = 0.03
-STALL_GRACE_SEC = 3.0     # how long past the longest recording to wait for a silent microphone stream
+STALL_GRACE_SEC = 3.0     # no microphone audio for this long means the stream has stalled
 
 
 class Endpointer:
@@ -132,28 +188,22 @@ def record_until_silence(stop_event, meter_cb=None, *, filename="input.wav", max
     endpointer = Endpointer(floor, max_sec=max_sec)
     frames = []
 
-    def callback(indata, frames_count, time_info, status):
-        if endpointer.ended:
-            return
-        level = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
-        if meter_cb is not None:
-            meter_cb(level)
-        frames.append(indata.copy())
-        endpointer.feed(level, frames_count / MIC_SAMPLE_RATE)
-
     try:
-        with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16',
-                            blocksize=int(MIC_SAMPLE_RATE * BLOCK_SEC), callback=callback):
-            # The endpointer counts audio, not time: a stream that opens but delivers nothing
-            # (seen on the device, agent stuck on "Listening") would otherwise wait forever.
-            deadline = time.time() + max_sec + STALL_GRACE_SEC
+        with Microphone(int(MIC_SAMPLE_RATE * BLOCK_SEC)) as mic:
             while not stop_event.is_set() and not endpointer.ended:
-                if time.time() > deadline:
+                try:
+                    block = mic.get(timeout=STALL_GRACE_SEC)
+                except queue.Empty:
+                    # A stream that opens but delivers nothing (seen on the device, agent stuck on "Listening")
                     endpointer.ended = "stalled"
-                    bmo_print("STT", f"Microphone stream delivered {len(frames)} blocks in {max_sec + STALL_GRACE_SEC:.0f} s; giving up")
-                    trace.event("mic_stalled", blocks=len(frames))
+                    bmo_print("STT", f"No microphone audio for {STALL_GRACE_SEC:.0f} s; giving up on this recording")
+                    trace.event("mic_stalled", where="record", blocks=len(frames))
                     break
-                sd.sleep(30)
+                level = float(np.sqrt(np.mean(block.astype(np.float32) ** 2)))
+                if meter_cb is not None:
+                    meter_cb(level)
+                frames.append(block)
+                endpointer.feed(level, len(block) / MIC_SAMPLE_RATE)
     except Exception as e:
         bmo_print("STT", f"Recording Error: {e}")
         return None

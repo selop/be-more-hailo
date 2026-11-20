@@ -1,6 +1,6 @@
 # BMO understands and speaks German
 
-Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: blocked (the user has to listen and speak: steps 7 and 13)
+Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: in progress
 
 German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-to-text language and a "respond only in German" rule. The gaps are below.
 
@@ -36,6 +36,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 18 | A dot after a digit does not end a spoken chunk ("der 20." / "November 2026." were spoken apart) | 8 | Test `test_german_date_is_not_cut_at_the_ordinal_dot`; a German date turn on the Pi is spoken in one piece | done (this commit) |
 | 19 | Hide the slow synthesis: prepare the next sentence while the current one is playing | 3 | In a four-sentence German turn the gaps between sentences are under 1 s (trace: each `spoke` starts within 1 s of the previous audio ending) | done (this commit), except the first gap: see Log |
 | 20 | The recorder gives up when the microphone stream delivers no audio (the agent was stuck on "Listening" after the user's first spoken German query) | – | Test `test_recorder_gives_up_when_the_microphone_delivers_nothing`; on the Pi a stalled recording ends within 18 s and logs `mic_stalled` | done (this commit) for the hang; why the stream stalled is open |
+| 21 | The wake-word loop notices a silent microphone stream and reopens it, instead of blocking on it forever | 20 | Test `test_wake_word_wait_notices_a_silent_microphone_and_hears_a_live_one`; on the Pi the loop still processes audio in real time (about 12.5 chunks per second) and a real wake word is detected | doing |
 
 ## Log
 
