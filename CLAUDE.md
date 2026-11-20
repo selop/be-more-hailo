@@ -20,6 +20,8 @@ make screenshot   # capture the Pi's display and open it
 make face         # open the face page locally; make face-demo feeds it fake events
 ```
 
+`python .claude/skills/solid-python/solid_check.py` lists classes and functions worth a look under the SOLID rules (see the `solid-python` skill).
+
 The device defaults to `selop@raspi`; use `BMO_HOST=selop@bmo` for the SSD install. `make setup` creates `.venv-dev` from `requirements-dev.txt` for a development machine.
 
 ## Running the Project
