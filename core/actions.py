@@ -60,6 +60,7 @@ REALTIME_KEYWORDS = [
     # German. Not "morgen" or "gerade": they are in "Guten Morgen" and "Wie spät ist es gerade?"
     "wetter", "vorhersage", "temperatur", "heute abend", "nachrichten", "neueste", "aktuell",
     "spielstand", "aktien", "preis von", "kostet",
+    "wie warm", "wie kalt", "wie viel grad", "regnet", "schneit", "draußen",
 ]
 
 QUESTION_MARKERS = [

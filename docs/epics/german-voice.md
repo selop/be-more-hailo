@@ -88,3 +88,9 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
   - CPU Whisper-Base on loudness-normalised audio: fixes "Lied von Debussy" and "Dresden". Normalising does nothing for the NPU model (same output).
   - CPU Whisper-Small: about 8 of 10 right (all three "Ultramarathon", "Debussy", "Dresden"), but 7.6 to 9.6 s per turn with the agent running.
   - The recordings are quiet: peaks at 10 to 30 % of full scale (one at 49 %) with the mic gain already at 100 %; speech is 4 to 17 times the noise.
+- 2026-11-20, decided by the user: speech-to-text moves to Whisper-Small on the CPU; the NPU is to be kept for vision ("image based scenarios such as spy games"). Branch `feature/stt-cpu-small`.
+  - whisper.cpp spends its time in the encoder (7.3 of 9.2 s for a 4 s clip). Greedy decoding plus an encoder window cut to the recording (`-ac`, at least 512) gives 2.9 s per turn standalone and 2.3 to 2.8 s inside the running agent, with the same or better transcripts ("Sing ein Lied." came out right only with the short window).
+  - The user's eleven recordings replayed through the running agent (`bmoctl hear`): 9 transcripts carry the meaning; left over are "Lüter Marathon" for "Ultramarathon" (one of three) and "in Tristen" for "in Dresden".
+  - The system prompt now says that its input comes from speech recognition and how to treat mishearings. Checked on the Pi with text turns: "Wie lange dauert der Lüter Marathon?" is answered as Ultramarathon without "Du meinst ..."; "Zinger Enlead." triggers `play_music`; "Stelied von Debussy" gives Clair de Lune.
+  - German weather wording ("wie warm", "wie viel Grad", "draußen", "regnet") now triggers the web search; before, the model said it had no weather data.
+  - Not solved: "in Tristen" was guessed as Triesen. A home town in the prompt would settle such cases; that is the user's to give.

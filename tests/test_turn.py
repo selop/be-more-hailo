@@ -460,6 +460,7 @@ def test_german_requests_take_the_same_shortcuts_as_english():
     assert picture["action"] == "display_image" and "einer%20Katze" in picture["image_url"], picture
     assert vlm_question("Mach ein Foto von mir.").startswith("What do you see")
     assert needs_web_search("Wie wird das Wetter morgen in Berlin?")
+    assert needs_web_search("Wie warm ist es gerade in Berlin?") and needs_web_search("Wie viel Grad sind es draußen?")
     # Ordinary German sentences take no shortcut
     for sentence in ("Guten Morgen, wie geht es dir heute?", "Wie spät ist es gerade?",
                      "Erzähl mir einen Witz über Roboter.", "Was ist die Hauptstadt von Frankreich?"):

@@ -86,7 +86,7 @@ agent_hailo.py  ───► core/  ──► hailo_platform.genai (NPU) ──�
 |-----------|---------|-------|
 | LLM | Hailo-10H NPU | Qwen2.5-1.5B-Instruct via `hailo_platform.genai.LLM` (direct Python API) |
 | Vision (VLM) | Hailo-10H NPU | Qwen2-VL-2B-Instruct via `hailo_platform.genai.VLM` (runs in subprocess — NPU only holds one generative model at a time) |
-| STT | Hailo-10H NPU | Whisper-Base via `hailo_platform.genai.Speech2Text` (coexists with LLM on shared VDevice; CPU whisper.cpp fallback) |
+| STT | CPU | Whisper-Small (German) or Whisper-Base.en (English) through whisper.cpp, about 2.5 s per turn (`STT_BACKEND=cpu`, the default). The NPU path (`STT_BACKEND=npu`, Whisper-Base via `hailo_platform.genai.Speech2Text`) is faster but got 4 of 10 real German turns right against about 8 |
 | TTS | CPU | Piper en_GB-semaine-medium (persistent AudioPlayer stream) |
 | Wake Word | CPU | OpenWakeWord (custom wakeword.onnx) |
 

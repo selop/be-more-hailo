@@ -19,10 +19,11 @@ Nothing below is pushed. `main` equals `origin/main` (`d602e52`). The branches a
 | `feature/cloud-llm` | 12 | `LLM_BACKEND=cloud`: replies from Claude Haiku 5.5 (`core/cloud_llm.py`) with fallback to the local model; `run-epic` skill |
 | `epic/german-voice` | 33 | German mode end to end, see below |
 | `perf/crt-single-face-pass` | 35 | The face renders once per pixel into a texture, the CRT pass samples it; this file |
+| `feature/stt-cpu-small` | 41 | Microphone crash fix; speech-to-text on the CPU with Whisper-Small (about 2.5 s per turn); the prompt expects mishearings; German weather words trigger the search |
 
 `bugfix/datetime-shadow-screensaver` is an older unmerged branch with one commit; untouched.
 
-The Pi runs the tip of `perf/crt-single-face-pass`. 77 tests pass on the laptop and on the Pi.
+The Pi runs the tip of `feature/stt-cpu-small`. 78 tests pass on the laptop and on the Pi.
 
 **Open decision for the user:** merge order and whether to push. The simplest is to fast-forward `main` to `perf/crt-single-face-pass`, since the branches are linear.
 
@@ -31,6 +32,7 @@ The Pi runs the tip of `perf/crt-single-face-pass`. 77 tests pass on the laptop 
 - **Display:** the live three.js face in Chromium kiosk is the only display. Tkinter, the PNG faces and the voice tuner are gone.
 - **Language:** German. `BMO_LANGUAGE=de` is set in `/etc/systemd/system/bmo-gui.service` (set it to `en` and restart to go back).
 - **Replies:** the hosted model. `.env` in the project folder has `LLM_BACKEND=cloud` and an `ANTHROPIC_API_KEY` (the user put them there). What the user says, as text, and the history leave the device.
+- **Hearing:** Whisper-Small on the CPU (`models/ggml-small.bin`, the user's decision on 2026-11-20). The NPU no longer does speech-to-text; the user wants it for vision ("spy games"). Next idea, not started: with replies from the cloud and hearing on the CPU, the NPU could hold the vision model all the time, which would remove the 30 s model swap before every photo.
 - **Voice:** Piper `de_DE-thorsten-high`, speed 1.4 (a value tuned for the earlier voice; the user has not commented on it). `thorsten-medium` and `ramona-low` are still in `piper/`, unused.
 - **Fan:** `dtparam=fan_temp1=65000` in `/boot/firmware/config.txt` (backup beside it), so the fan stays on its quiet step up to 65 °C.
 - **Models:** rewritten in place on the SD card this morning; a cold boot loads them in about one minute instead of six.
