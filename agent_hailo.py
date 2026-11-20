@@ -6,19 +6,16 @@
 import atexit
 import threading
 import time
-import subprocess
 import importlib
 import os
 
 # Core modules
 from core.llm import is_llm_ready, _get_llm
-from core.tts import get_player
-from core.config import ALSA_DEVICE
 from core.turn import Conversation, TurnUI
 from core.control import ControlServer
 from core.display_server import DisplayServer, StateMirror, speech_envelope
 from core import image_display
-from core.screensaver import screensaver_loop
+from core.screensaver import Screensaver
 from core.sounds import SoundManager
 from core.camera import CameraHandler
 from core.image_display import download_and_display
@@ -32,10 +29,10 @@ setup_logging()
 # =========================================================================
 
 # Modules that can be safely reloaded (no hardware/singleton state).
-import core.actions, core.dispatch, core.config, core.screensaver
+import core.actions, core.dispatch, core.config
 
 _HOT_RELOAD_MODULES = [
-    core.actions, core.dispatch, core.config, core.screensaver,
+    core.actions, core.dispatch, core.config,
 ]
 
 def _hot_reload_watcher(stop_event):
@@ -65,13 +62,6 @@ def _hot_reload_watcher(stop_event):
                 bmo_print("HOT-RELOAD", f"Error reloading {mod.__name__}: {e}")
         if reloaded:
             bmo_print("HOT-RELOAD", f"Reloaded: {', '.join(reloaded)}")
-            # Re-import names that the main loop uses directly
-            _refresh_imports()
-
-def _refresh_imports():
-    """Re-bind module-level names after hot-reload."""
-    global screensaver_loop
-    from core.screensaver import screensaver_loop
 
 # =========================================================================
 # 2. AGENT
@@ -113,8 +103,7 @@ class Agent(TurnUI):
             play_sound=self.sounds.play,
             brain=self.conversation.brain,
             hide_bubble=self._hide_bubble,
-            set_display_image=self.store.set_display_image,
-            clear_display_image=self.store.clear_display_image,
+            store=self.store,
             stop_thinking_audio=self.conversation.stop_thinking_audio,
         )
 
@@ -126,8 +115,12 @@ class Agent(TurnUI):
         bmo_print("FACE", "Page connected" if self.display.connected else "Page not connected after 90 s; loading the models anyway")
 
         threading.Thread(target=self.conversation.run, daemon=True).start()
-        self.last_screensaver_audio_time = time.time()
-        threading.Thread(target=self.screensaver_audio_loop, daemon=True).start()
+        screensaver = Screensaver(
+            store=self.store, set_state=self.set_state, speak=self.conversation.speak,
+            show_image=self._show_idle_image, get_llm=lambda: _get_llm() if is_llm_ready() else None,
+            stop_event=self.stop_event,
+        )
+        threading.Thread(target=screensaver.run, daemon=True).start()
         threading.Thread(target=_hot_reload_watcher, args=(self.stop_event,), daemon=True).start()
 
     def run(self):
@@ -186,40 +179,9 @@ class Agent(TurnUI):
         kind = action.get("type")
         bmo_print("FACE", f"Touch: {kind}")
         if kind == "tap":
-            self.mute_bmo()
+            self.conversation.toggle_mute()
         elif kind == "shutdown":
             self._shutdown()
-
-    def mute_bmo(self):
-        self.store.set_muted(not self.store.muted)
-        if self.store.muted:
-            player = get_player()
-            if player:
-                player.stop_playback()
-                bmo_print("MUTE", "Stopped persistent audio player.")
-            try:
-                subprocess.run(["killall", "-9", "aplay"], capture_output=True)
-            except Exception:
-                pass
-
-            old_phase = self.store.phase
-            self.store.set_phase(Phase.SHHH, msg="Muted")
-            self.conversation.stop_thinking_audio()
-
-            def revert_state():
-                if self.store.phase == Phase.SHHH:
-                    self.store.set_phase(
-                        old_phase if old_phase != Phase.SHHH else Phase.IDLE,
-                        msg="Muted",
-                    )
-            self._later(3, revert_state)
-        else:
-            self.store.set_phase(Phase.IDLE, expression="happy", msg="Unmuted!")
-            def revert_state():
-                if self.store.expression == "happy" and self.store.phase == Phase.IDLE:
-                    self.store.set_expression("idle")
-                    self.set_status("Ready...")
-            self._later(2, revert_state)
 
     def _shutdown(self):
         bmo_print("SHUTDOWN", "Long press shutdown triggered")
@@ -251,7 +213,7 @@ class Agent(TurnUI):
         self.display.publish("boot", stage=frame)
 
     def take_photo(self, user_text):
-        self.camera.handle_photo(user_text, lambda: self.store.phase.value)
+        self.camera.handle_photo(user_text)
 
     def boot_failed(self, error):
         """Exit with a failure status so systemd (Restart=on-failure)
@@ -275,37 +237,14 @@ class Agent(TurnUI):
         if image is None or self.store.display_image is image:
             self.store.clear_display_image()
 
-    # ------------------------------------------------------------------
-    # Screensaver audio
-    # ------------------------------------------------------------------
-
-    def screensaver_audio_loop(self):
-        def display_image_cb(img_url):
-            bmo_print("SCREENSAVER", f"Downloading image from: {img_url}")
-            self.store.set_phase(Phase.DISPLAY_IMAGE, msg="Visualizing...")
-            if download_and_display(img_url, self.store.set_display_image):
-                time.sleep(10)
-            if self.store.phase == Phase.DISPLAY_IMAGE:
-                self.store.set_phase(Phase.SCREENSAVER, msg="Sleeping...")
-
-        screensaver_loop(
-            stop_event=self.stop_event,
-            get_state=lambda: self.store.phase.value,
-            set_state=self.set_state,
-            speak_fn=self.conversation.speak,
-            play_sound_fn=self.sounds.play,
-            is_muted_fn=lambda: self.store.muted,
-            display_image_fn=display_image_cb,
-            get_last_state_change=lambda: self.store.last_phase_change,
-            get_expression=lambda: self.store.expression,
-            get_last_audio_time=lambda: self.last_screensaver_audio_time,
-            set_last_audio_time=lambda t: setattr(self, 'last_screensaver_audio_time', t),
-            is_llm_ready_fn=is_llm_ready,
-            get_llm_fn=_get_llm,
-            screensaver_state=Phase.SCREENSAVER.value,
-            display_image_state=Phase.DISPLAY_IMAGE.value,
-            alsa_device=ALSA_DEVICE,
-        )
+    def _show_idle_image(self, img_url):
+        """A picture that goes with a spoken idle thought, shown for ten seconds."""
+        bmo_print("SCREENSAVER", f"Downloading image from: {img_url}")
+        self.store.set_phase(Phase.DISPLAY_IMAGE, msg="Visualizing...")
+        if download_and_display(img_url, self.store.set_display_image):
+            time.sleep(10)
+        if self.store.phase == Phase.DISPLAY_IMAGE:
+            self.store.set_phase(Phase.SCREENSAVER, msg="Sleeping...")
 
 
 if __name__ == "__main__":

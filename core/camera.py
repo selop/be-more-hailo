@@ -25,10 +25,8 @@ class CameraHandler:
     play_sound : callable(str) -> Popen | None
     brain : Brain
     hide_bubble : callable()
-    set_display_image : callable(PIL.Image)
-        Record the picture on show.
-    clear_display_image : callable()
-        Set the display image reference to None.
+    store : StateStore
+        Holds the picture on show and the current phase.
     stop_thinking_audio : callable()
     """
 
@@ -40,8 +38,7 @@ class CameraHandler:
         play_sound,
         brain,
         hide_bubble,
-        set_display_image,
-        clear_display_image,
+        store,
         stop_thinking_audio,
     ):
         self.set_state = set_state
@@ -49,11 +46,10 @@ class CameraHandler:
         self.play_sound = play_sound
         self.brain = brain
         self.hide_bubble = hide_bubble
-        self.set_display_image = set_display_image
-        self.clear_display_image = clear_display_image
+        self.store = store
         self.stop_thinking_audio = stop_thinking_audio
 
-    def handle_photo(self, user_text, get_state):
+    def handle_photo(self, user_text):
         """Run the full camera UX: intro speech → capture → VLM → reload.
 
         Should be called from the main conversation thread when
@@ -100,7 +96,7 @@ class CameraHandler:
             try:
                 photo_img = Image.open("temp.jpg")
                 photo_img = apply_bmo_border(photo_img)
-                self.set_display_image(photo_img)
+                self.store.set_display_image(photo_img)
                 notify_image(photo_img)
             except Exception as e:
                 bmo_print("CAMERA", f"Photo display error: {e}")
@@ -111,12 +107,12 @@ class CameraHandler:
             analyzing_stop = threading.Event()
 
             def play_analyzing_sequence():
-                while not analyzing_stop.is_set() and get_state() == "thinking":
+                while not analyzing_stop.is_set() and self.store.phase.value == "thinking":
                     proc = self.play_sound("analyzing_sounds")
                     if proc:
                         proc.wait()
                     for _ in range(50):
-                        if analyzing_stop.is_set() or get_state() != "thinking":
+                        if analyzing_stop.is_set() or self.store.phase.value != "thinking":
                             break
                         time.sleep(0.1)
 
@@ -137,7 +133,7 @@ class CameraHandler:
             reload_after_vlm()
 
             # Restore face animation
-            self.clear_display_image()
+            self.store.clear_display_image()
 
         except FileNotFoundError as e:
             bmo_print("CAMERA", f"Error: {e}")

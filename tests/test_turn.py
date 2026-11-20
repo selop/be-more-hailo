@@ -354,6 +354,82 @@ def test_recording_ends_after_speech_even_in_a_loud_room():
     assert seconds_recorded([1200] * 1000, room) == (15.0, "max", True)
 
 
+def test_mute_stops_playback_and_unmute_returns_to_idle():
+    class NoShell:
+        calls = []
+
+        @staticmethod
+        def run(cmd, **kwargs):
+            NoShell.calls.append(cmd)
+
+    with Harness() as h:
+        saved, turn.subprocess = turn.subprocess, NoShell
+        try:
+            h.player.stopped = 0
+            h.player.stop_playback = lambda: setattr(h.player, "stopped", h.player.stopped + 1)
+            h.conv.toggle_mute()
+            assert h.store.muted and h.store.phase == Phase.SHHH
+            assert h.player.stopped == 1 and NoShell.calls == [["killall", "-9", "aplay"]]
+            h.conv.toggle_mute()
+            assert not h.store.muted and h.store.phase == Phase.IDLE and h.store.expression == "happy"
+        finally:
+            turn.subprocess = saved
+
+
+def test_screensaver_shows_an_idle_face_then_returns():
+    import datetime as real_datetime
+    from core import screensaver as module
+
+    class Clock:
+        @staticmethod
+        def time():
+            return time.time() + 3600        # long idle
+
+        @staticmethod
+        def sleep(seconds):
+            pass
+
+    class Noon:
+        class datetime:
+            @staticmethod
+            def now():
+                return real_datetime.datetime(2026, 1, 1, 12, 0)
+
+    class Dice:
+        rolls = [0.05, 0.5]                   # an idle face, then no spoken thought
+
+        @staticmethod
+        def random():
+            return Dice.rolls.pop(0)
+
+        @staticmethod
+        def choice(items):
+            return sorted(items)[0]
+
+    store, states = StateStore(), []
+
+    def set_state(name, msg=""):
+        states.append(name)
+        try:
+            store.set_phase(Phase(name), msg=msg)
+        except ValueError:
+            store.set_expression(name)
+
+    saver = module.Screensaver(store=store, set_state=set_state, speak=lambda *a, **k: states.append("spoke"),
+                               show_image=None, get_llm=lambda: None, stop_event=threading.Event())
+    saved = (module.time, module.datetime, module.random)
+    module.time, module.datetime, module.random = Clock, Noon, Dice
+    try:
+        saver.tick()                          # not in the screensaver phase: nothing
+        assert states == []
+        store.set_phase(Phase.SCREENSAVER)
+        saver.tick()
+        face = sorted(module.CHARACTER.idle_expressions)[0]
+        assert states == [face, "screensaver"]
+    finally:
+        module.time, module.datetime, module.random = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

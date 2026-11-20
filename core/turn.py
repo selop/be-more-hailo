@@ -10,6 +10,7 @@ turn on screen implements :class:`TurnUI` and is told what happened.
 import atexit
 import queue
 import random
+import subprocess
 import threading
 import time
 import traceback
@@ -185,6 +186,44 @@ class Conversation:
             except Exception:
                 pass
             self.thinking_audio_process = None
+
+    def toggle_mute(self):
+        """Mute or unmute. Muting stops whatever is playing and shows the
+        hush face for a moment; unmuting shows a happy one."""
+        store = self.store
+        store.set_muted(not store.muted)
+        if store.muted:
+            player = get_player()
+            if player:
+                player.stop_playback()
+                bmo_print("MUTE", "Stopped persistent audio player.")
+            try:
+                subprocess.run(["killall", "-9", "aplay"], capture_output=True)
+            except Exception:
+                pass
+
+            old_phase = store.phase
+            store.set_phase(Phase.SHHH, msg="Muted")
+            self.stop_thinking_audio()
+
+            def revert_state():
+                if store.phase == Phase.SHHH:
+                    store.set_phase(old_phase if old_phase != Phase.SHHH else Phase.IDLE, msg="Muted")
+            self._later(3, revert_state)
+        else:
+            store.set_phase(Phase.IDLE, expression="happy", msg="Unmuted!")
+
+            def revert_state():
+                if store.expression == "happy" and store.phase == Phase.IDLE:
+                    store.set_expression("idle")
+                    self.ui.set_status("Ready...")
+            self._later(2, revert_state)
+
+    @staticmethod
+    def _later(seconds, fn):
+        timer = threading.Timer(seconds, fn)
+        timer.daemon = True
+        timer.start()
 
     def _play_thinking_loop(self):
         """Background thread: ack sound → thinking sounds until phase changes."""

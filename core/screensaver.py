@@ -4,14 +4,17 @@
 import datetime
 import json
 import logging
+import os
 import random
 import re
+import subprocess
 import time
 
 from .actions import clean_llm_response
-from .config import CHARACTER, SOUNDS_DIR
+from .config import ALSA_DEVICE, CHARACTER, SOUNDS_DIR
 from .log import bmo_print
 from .search import search_web
+from .state import Phase
 
 logger = logging.getLogger(__name__)
 
@@ -58,154 +61,129 @@ def extract_image_url(phrase):
     return phrase, None
 
 
-def screensaver_loop(
-    stop_event,
-    get_state,
-    set_state,
-    speak_fn,
-    play_sound_fn,
-    is_muted_fn,
-    display_image_fn,
-    get_last_state_change,
-    get_last_audio_time,
-    set_last_audio_time,
-    is_llm_ready_fn,
-    get_llm_fn,
-    *,
-    get_expression=None,
-    screensaver_state="screensaver",
-    display_image_state="display_image",
-    expression_states=None,
-    persona_states=None,
-    alsa_device=None,
-):
-    """Main screensaver audio/animation loop.
-
-    All GUI interaction is done through callbacks so this module has no
-    Tkinter dependency.
+class Screensaver:
+    """What the assistant does by itself while the screensaver shows: now
+    and then another face, a persona gag, or a spoken thought.
 
     Parameters
     ----------
-    stop_event : threading.Event
-    get_state : callable() -> str
-        Returns the current phase string.
+    store : StateStore
     set_state : callable(str, str)
-    speak_fn : callable(str, msg=str)
-    play_sound_fn : callable(str) -> handle
-    is_muted_fn : callable() -> bool
-    display_image_fn : callable(str) -> None
-        Download and display an image URL on screen.
-    get_last_state_change : callable() -> float
-    get_last_audio_time : callable() -> float
-    set_last_audio_time : callable(float)
-    is_llm_ready_fn : callable() -> bool
-    get_llm_fn : callable
-    get_expression : callable() -> str or None
-        Returns the current expression string.  When provided, revert
-        guards check expression instead of phase.
-    screensaver_state, display_image_state : str
-    expression_states : list[str] or None
-    persona_states : list[str] or None
-    alsa_device : str or None
+        Takes a phase or expression name and a status text.
+    speak : callable(str, msg=str)
+    show_image : callable(str)
+        Download and display an image URL.
+    get_llm : callable() -> LLM or None
+        The language model, or None while it is not loaded.
+    stop_event : threading.Event
     """
-    import os
 
-    if expression_states is None:
-        expression_states = CHARACTER.idle_expressions
-    if persona_states is None:
-        persona_states = sorted(CHARACTER.personas)
+    CHECK_SECONDS = 30
+    THOUGHT_GAP_SECONDS = 1200      # at least this long between spoken thoughts
 
-    while not stop_event.is_set():
-        time.sleep(30)
-        if get_state() != screensaver_state:
-            continue
+    def __init__(self, *, store, set_state, speak, show_image, get_llm, stop_event):
+        self.store = store
+        self.set_state = set_state
+        self.speak = speak
+        self.show_image = show_image
+        self.get_llm = get_llm
+        self.stop_event = stop_event
+        self.last_audio_time = time.time()
 
-        now = datetime.datetime.now()
-        hour = now.hour
+    def run(self):
+        while not self.stop_event.is_set():
+            time.sleep(self.CHECK_SECONDS)
+            self.tick()
+
+    def tick(self):
+        """One look at the idle assistant; most of the time nothing happens."""
+        store, screensaver = self.store, Phase.SCREENSAVER.value
+        if store.phase != Phase.SCREENSAVER:
+            return
 
         # Quiet Hours: 10 PM to 8 AM
+        hour = datetime.datetime.now().hour
         if hour >= 22 or hour < 8:
-            continue
+            return
 
         # Skip if user was recently interacting
-        if time.time() - get_last_state_change() < 60:
-            continue
-
-        # Helper: check current expression (falls back to phase if no expression callback)
-        _get_expr = get_expression if get_expression is not None else get_state
+        if time.time() - store.last_phase_change < 60:
+            return
 
         # Random visual-only boredom animations (~10% chance every 30s)
         if random.random() < 0.10:
-            expr = random.choice(expression_states)
-            set_state(expr, "Zzz..." if expr == "sleepy" else "...")
+            expr = random.choice(CHARACTER.idle_expressions)
+            self.set_state(expr, "Zzz..." if expr == "sleepy" else "...")
             time.sleep(4)
-            if _get_expr() == expr:
-                set_state(screensaver_state, "Screensaver...")
+            if store.expression == expr:
+                self.set_state(screensaver, "Screensaver...")
 
         # Random Persona Gags (~5% chance every 30s)
         elif random.random() < 0.05:
-            persona = random.choice(persona_states)
-            set_state(persona, "...")
-
-            sound_file = os.path.join(SOUNDS_DIR, "personas", f"{persona}.wav")
-            if not is_muted_fn() and os.path.exists(sound_file) and alsa_device:
-                try:
-                    from .tts import get_cached_path
-                    import subprocess
-                    cached = get_cached_path(sound_file)
-                    subprocess.Popen(['aplay', '-D', alsa_device, '-q', cached])
-                except Exception:
-                    pass
-
-            time.sleep(8)
-            if _get_expr() == persona:
-                set_state(screensaver_state, "Screensaver...")
-            continue
+            self._persona_gag()
+            return
 
         # ~2% chance every 30 seconds for audio vocalizations
         if random.random() < 0.02:
             current_hour = datetime.datetime.now().hour
             if current_hour >= 22 or current_hour < 7:
-                continue
+                return
+            if time.time() - self.last_audio_time > self.THOUGHT_GAP_SECONDS:
+                self._speak_thought()
 
-            if time.time() - get_last_audio_time() > 1200:
-                phrase = None
+    def _persona_gag(self):
+        persona = random.choice(sorted(CHARACTER.personas))
+        self.set_state(persona, "...")
 
-                if is_llm_ready_fn():
-                    try:
-                        topic = random.choice(CHARACTER.search_topics)
-                        bmo_print("SCREENSAVER", f"Searching for: {topic}")
-                        search_result = search_web(topic)
+        sound_file = os.path.join(SOUNDS_DIR, "personas", f"{persona}.wav")
+        if not self.store.muted and os.path.exists(sound_file) and ALSA_DEVICE:
+            try:
+                from .tts import get_cached_path
+                subprocess.Popen(['aplay', '-D', ALSA_DEVICE, '-q', get_cached_path(sound_file)])
+            except Exception:
+                pass
 
-                        if search_result and search_result not in ("SEARCH_EMPTY", "SEARCH_ERROR"):
-                            for attempt in range(2):
-                                phrase = generate_thought(search_result, get_llm_fn)
-                                if phrase:
-                                    bmo_print("SCREENSAVER", f"{CHARACTER.name} muses: {phrase}")
+        time.sleep(8)
+        if self.store.expression == persona:
+            self.set_state(Phase.SCREENSAVER.value, "Screensaver...")
 
-                                    phrase, img_url = extract_image_url(phrase)
+    def _speak_thought(self):
+        phrase = None
 
-                                    if phrase:
-                                        speak_fn(phrase, msg="Pondering...")
+        if self.get_llm() is not None:
+            try:
+                topic = random.choice(CHARACTER.search_topics)
+                bmo_print("SCREENSAVER", f"Searching for: {topic}")
+                search_result = search_web(topic)
 
-                                    if img_url:
-                                        display_image_fn(img_url)
+                if search_result and search_result not in ("SEARCH_EMPTY", "SEARCH_ERROR"):
+                    for attempt in range(2):
+                        phrase = generate_thought(search_result, self.get_llm)
+                        if phrase:
+                            bmo_print("SCREENSAVER", f"{CHARACTER.name} muses: {phrase}")
 
-                                    set_last_audio_time(time.time())
-                                    break
-                                bmo_print("SCREENSAVER", f"Attempt {attempt + 1} failed, retrying...")
-                                time.sleep(5)
-                    except Exception as e:
-                        bmo_print("SCREENSAVER", f"Dynamic thought failed: {e}")
-                else:
-                    bmo_print("SCREENSAVER", "LLM server not reachable, skipping thought")
+                            phrase, img_url = extract_image_url(phrase)
 
-                if not phrase:
-                    phrase = random.choice(CHARACTER.fallback_phrases)
-                    bmo_print("SCREENSAVER", f"Fallback: {phrase}")
+                            if phrase:
+                                self.speak(phrase, msg="Pondering...")
 
-                if get_state() == screensaver_state:
-                    old_state = get_state()
-                    speak_fn(phrase, msg="")
-                    set_state(old_state, "")
-                    set_last_audio_time(time.time())
+                            if img_url:
+                                self.show_image(img_url)
+
+                            self.last_audio_time = time.time()
+                            break
+                        bmo_print("SCREENSAVER", f"Attempt {attempt + 1} failed, retrying...")
+                        time.sleep(5)
+            except Exception as e:
+                bmo_print("SCREENSAVER", f"Dynamic thought failed: {e}")
+        else:
+            bmo_print("SCREENSAVER", "LLM server not reachable, skipping thought")
+
+        if not phrase:
+            phrase = random.choice(CHARACTER.fallback_phrases)
+            bmo_print("SCREENSAVER", f"Fallback: {phrase}")
+
+        if self.store.phase == Phase.SCREENSAVER:
+            self.speak(phrase, msg="")
+            self.set_state(Phase.SCREENSAVER.value, "")
+            self.last_audio_time = time.time()
