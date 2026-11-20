@@ -112,6 +112,11 @@ if [ ! -f "whisper.cpp/build/bin/whisper-cli" ]; then
 fi
 
 # Download Whisper base.en model
+if [ ! -f "models/ggml-small.bin" ]; then
+    # Multilingual Whisper-Small: speech-to-text for German (BMO_LANGUAGE=de)
+    wget -q -O models/ggml-small.bin \
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+fi
 if [ ! -f "models/ggml-base.en.bin" ]; then
     echo -e "${YELLOW}Downloading Whisper base.en model...${NC}"
     wget -q -O models/ggml-base.en.bin \

@@ -603,6 +603,18 @@ def test_wake_word_wait_notices_a_silent_microphone_and_hears_a_live_one():
     assert with_fake_microphone(True, wait) is True          # audio flows: detected
 
 
+def test_whisper_is_given_a_window_that_fits_the_recording():
+    from core import stt
+
+    def window(seconds):
+        cmd = stt._whisper_command("x.wav", seconds)
+        return int(cmd[cmd.index("-ac") + 1])
+    assert window(2.0) == 512               # short turns: the tested minimum
+    assert window(15.0) == 814              # the longest recording still fits (15 s is 750 frames)
+    assert window(60.0) == 1500             # never more than the model has
+    assert "-bs" in stt._whisper_command("x.wav", 3.0)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

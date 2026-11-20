@@ -90,13 +90,15 @@ SOUNDS_DIR = CHARACTER.asset("sounds")
 ALSA_DEVICE = os.environ.get("ALSA_DEVICE", "default")
 
 # STT Settings
-# NPU Speech2Text (preferred — 7x faster than CPU whisper.cpp)
+# "cpu": whisper.cpp, Whisper-Small for German. On the user's own German recordings it got about
+# 8 of 10 turns right in about 3 s; Whisper-Base on the NPU ("npu") got 4 of 10 in under 1 s.
+# The NPU is kept for the language and vision models.
+STT_BACKEND = os.environ.get("STT_BACKEND", "cpu")
 WHISPER_HEF_PATH = os.environ.get("WHISPER_HEF_PATH", "./models/Whisper-Base.hef")
-# CPU fallback (whisper.cpp subprocess)
 WHISPER_CMD = "./whisper.cpp/build/bin/whisper-cli"
 WHISPER_MODELS = {
     "en": "./models/ggml-base.en.bin",
-    "de": "./models/ggml-base.bin",  # Multilingual model for non-English
+    "de": "./models/ggml-small.bin",  # multilingual
 }
 WHISPER_MODEL = WHISPER_MODELS.get(LANGUAGE, WHISPER_MODELS["en"])
 

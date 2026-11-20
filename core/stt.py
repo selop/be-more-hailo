@@ -5,7 +5,7 @@ import re
 import wave
 import numpy as np
 from . import trace
-from .config import CHARACTER, WHISPER_CMD, WHISPER_MODEL, WHISPER_HEF_PATH, LANGUAGE
+from .config import CHARACTER, WHISPER_CMD, WHISPER_MODEL, WHISPER_HEF_PATH, LANGUAGE, STT_BACKEND
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,10 @@ def init_stt():
     Falls back silently to CPU whisper.cpp if the HEF is missing or init fails."""
     global _stt_instance
     if _stt_instance is not None:
+        return
+    if STT_BACKEND != "npu":
+        # shortcut: the NPU path stays in the code but unused; delete it once the NPU is given to vision for good
+        logger.info(f"Speech-to-text on the CPU ({WHISPER_MODEL})")
         return
 
     try:
@@ -89,15 +93,6 @@ def _load_audio_as_float32(filepath: str) -> np.ndarray:
     return audio
 
 
-def _is_16khz_mono_wav(filepath: str) -> bool:
-    """Check if file is already a 16kHz mono WAV (no conversion needed)."""
-    try:
-        with wave.open(filepath, 'rb') as wf:
-            return wf.getframerate() == 16000 and wf.getnchannels() == 1
-    except Exception:
-        return False
-
-
 # --------------------------------------------------------------------------- #
 #  Post-processing (shared between NPU and CPU paths)
 # --------------------------------------------------------------------------- #
@@ -119,7 +114,8 @@ def _clean_transcription(text: str) -> str:
     lowered = text.lower()
     hallucinations = [
         "[silence]", "(silence)", "you", "thanks for watching!",
-        "[blank_audio]", "thank you.", "thank you", "thanks."
+        "[blank_audio]", "thank you.", "thank you", "thanks.",
+        "vielen dank.", "vielen dank", "untertitel der amara.org-community",      # what Whisper invents for German silence
     ]
 
     # Reject output that is entirely inside parentheses or brackets
@@ -157,29 +153,39 @@ def _transcribe_npu(audio_filepath: str) -> str:
 #  CPU fallback transcription (whisper.cpp subprocess)
 # --------------------------------------------------------------------------- #
 
+def _whisper_command(wav_16k: str, seconds: float) -> list[str]:
+    """whisper.cpp call tuned for one short utterance on the Pi's CPU.
+
+    Nearly all the time goes into the encoder, which by default looks at a
+    30 s window. Limiting the window to the recording (``-ac``, 50 frames per
+    second, never under about 10 s) and decoding greedily took Whisper-Small
+    from 8.8 s to 2.9 s per turn on the device with the same transcripts.
+    """
+    audio_ctx = min(1500, max(512, int(seconds * 50) + 64))
+    cmd = [WHISPER_CMD, "-m", WHISPER_MODEL, "-f", wav_16k, "-nt", "-t", "4",
+           "-bs", "1", "-bo", "1", "-ac", str(audio_ctx)]
+    if LANGUAGE != "en":
+        cmd += ["-l", LANGUAGE]
+    return cmd
+
+
 def _transcribe_cpu(audio_filepath: str) -> str:
-    """Transcribe using whisper.cpp on CPU (fallback)."""
-    temp_wav = None
-    whisper_input = audio_filepath
-
+    """Transcribe with whisper.cpp on the CPU."""
+    temp_wav = f"{audio_filepath}_16k.wav"
     try:
-        # Convert if not already 16kHz mono WAV
-        if not _is_16khz_mono_wav(audio_filepath):
-            temp_wav = f"{audio_filepath}_16k.wav"
-            logger.info(f"Converting {audio_filepath} to 16kHz WAV for whisper.cpp ...")
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", audio_filepath, "-ar", "16000", "-ac", "1", temp_wav],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            whisper_input = temp_wav
-        else:
-            logger.info(f"Input is already 16kHz mono WAV, skipping FFmpeg.")
+        # 16 kHz mono, peak brought up to 90 %: recordings from the device peak at 10 to 30 %
+        audio = _load_audio_as_float32(audio_filepath)
+        peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+        if peak > 0:
+            audio = audio * (0.9 / peak)
+        with wave.open(temp_wav, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes((np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
 
-        cmd = [WHISPER_CMD, "-m", WHISPER_MODEL, "-f", whisper_input, "-nt"]
-        if LANGUAGE != "en":
-            cmd += ["-l", LANGUAGE]
+        cmd = _whisper_command(temp_wav, len(audio) / 16000)
         logger.info(f"Running whisper.cpp on CPU: {' '.join(cmd)}")
-
         output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8").strip()
         return _clean_transcription(output)
 
@@ -190,7 +196,7 @@ def _transcribe_cpu(audio_filepath: str) -> str:
         logger.error(f"CPU transcription error: {e}")
         return ""
     finally:
-        if temp_wav and os.path.exists(temp_wav):
+        if os.path.exists(temp_wav):
             try:
                 os.remove(temp_wav)
             except Exception:
