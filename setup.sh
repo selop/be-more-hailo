@@ -94,6 +94,10 @@ echo -e "${YELLOW}[6/13] Downloading voice model...${NC}"
 BASE_VOICE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/semaine/medium"
 wget -nc -q -O piper/en_GB-semaine-medium.onnx      "$BASE_VOICE/en_GB-semaine-medium.onnx"
 wget -nc -q -O piper/en_GB-semaine-medium.onnx.json "$BASE_VOICE/en_GB-semaine-medium.onnx.json"
+# German voice (BMO_LANGUAGE=de)
+DE_VOICE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/high"
+wget -nc -q -O piper/de_DE-thorsten-high.onnx      "$DE_VOICE/de_DE-thorsten-high.onnx"
+wget -nc -q -O piper/de_DE-thorsten-high.onnx.json "$DE_VOICE/de_DE-thorsten-high.onnx.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. whisper.cpp (CPU fallback for STT — primary STT runs on NPU via Whisper HEF)

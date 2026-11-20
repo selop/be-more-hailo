@@ -36,7 +36,7 @@ model = "./piper/en_GB-semaine-medium.onnx"
 length_scale = 1.0
 
 [voice.de]
-model = "./piper/de_DE-ramona-low.onnx"
+model = "./piper/de_DE-thorsten-high.onnx"
 length_scale = 1.4
 
 [voice.pronunciations]
