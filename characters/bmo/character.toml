@@ -20,15 +20,13 @@ heard_as = ["Beemo", "Bemo"]
 sounds = "sounds"
 wakeword = "wakeword.onnx"
 pronunciations = "pronunciations.json"
-voice_eq = "voice_eq.json"
 
 [hearing]
 # Detection threshold tuned for this pack's wake-word model.
 wake_threshold = 0.35
 
 [voice]
-# Low-pass filter for the "tiny speaker" sound. A saved assets.voice_eq file
-# overrides these.
+# Low-pass filter for the "tiny speaker" sound.
 lpf_enabled = true
 lpf_cutoff = 4000
 lpf_order = 4

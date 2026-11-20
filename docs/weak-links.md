@@ -143,6 +143,8 @@ Smallest fix: move jobs 4 and 5 into `core/` (mute and picture lifetime to `Conv
 
 Partly fixed 2026-11-20 (uncommitted; run on the Pi: turn, mute, screensaver, photo on screen, Chromium restart): the Tkinter display is gone. `core/animation.py`, `bubble.py`, `meter.py`, `timer_clock.py` and `voice_eq.py` (the voice tuner) are deleted; `BotGUI` became `Agent` (about 230 lines), which only publishes to the live face. The idle-to-screensaver timer is in `Agent.run()`, which also restarts Chromium if it exits. Still in `Agent`: mute, shutdown and the screensaver wiring.
 
+2026-11-20: the loader for the voice tuner's saved settings (`voice_eq.json`) was removed; the voice filter now comes only from the character pack and the `VOICE_LPF_*` environment variables.
+
 Observed 2026-11-20:
 
 - The 30 fps cap made the face strobe purple. The springs in `face/index.html` (`Eased.step`) took one integration step per frame and diverged once speed × frame time neared 1 (mouth while speaking at 33 ms). Measured: alternate frames at brightness 68 instead of 168. Fixed by sub-stepping; 264 captured frames across a turn and a mute toggle show none.

@@ -150,7 +150,7 @@ class Character:
 
     def asset(self, key: str) -> str:
         """Absolute path of asset *key* (``sounds``, ``wakeword``,
-        ``pronunciations``, ``voice_eq``).
+        ``pronunciations``).
 
         Paths in the pack are relative to the project root. When a key is
         not listed, the asset is expected inside the pack folder.
@@ -159,7 +159,6 @@ class Character:
             "sounds": "sounds",
             "wakeword": "wakeword.onnx",
             "pronunciations": "pronunciations.json",
-            "voice_eq": "voice_eq.json",
         }
         configured = self._data.get("assets", {}).get(key)
         if configured is not None:

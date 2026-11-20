@@ -1,5 +1,4 @@
 import datetime
-import json
 import os
 from dotenv import load_dotenv
 
@@ -52,33 +51,17 @@ PIPER_MODEL = _voice["model"]
 # Speech rate: >1.0 = slower.
 PIPER_LENGTH_SCALE = _voice["length_scale"]
 
-# Voice EQ — low-pass filter for the character's speaker sound. Defaults come
-# from the character pack; env vars and a saved voice_eq.json override them.
+# Low-pass filter for the character's speaker sound. Defaults come from the
+# character pack; env vars override them.
 _voice_filter = CHARACTER.voice_filter
 VOICE_LPF_ENABLED = os.environ.get("VOICE_LPF_ENABLED", "1" if _voice_filter["enabled"] else "0") != "0"
 VOICE_LPF_CUTOFF = int(os.environ.get("VOICE_LPF_CUTOFF", str(_voice_filter["cutoff"])))   # Hz (try 4000–8000)
 VOICE_LPF_ORDER = int(os.environ.get("VOICE_LPF_ORDER", str(_voice_filter["order"])))      # Butterworth order (2=gentle, 6=steep)
 
-VOICE_EQ_FILE = CHARACTER.asset("voice_eq")
 PRONUNCIATION_FILE = CHARACTER.asset("pronunciations")
 
 # Asset folder of the active character
 SOUNDS_DIR = CHARACTER.asset("sounds")
-
-def _load_voice_eq():
-    """Override VOICE_LPF_* globals from voice_eq.json if it exists."""
-    global VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER
-    if os.path.exists(VOICE_EQ_FILE):
-        try:
-            with open(VOICE_EQ_FILE, "r") as f:
-                data = json.load(f)
-            VOICE_LPF_ENABLED = data.get("enabled", VOICE_LPF_ENABLED)
-            VOICE_LPF_CUTOFF = int(data.get("cutoff", VOICE_LPF_CUTOFF))
-            VOICE_LPF_ORDER = int(data.get("order", VOICE_LPF_ORDER))
-        except Exception:
-            pass
-
-_load_voice_eq()
 
 # ALSA output device for hardware audio playback (aplay -D).
 # The USB combo device (mic+speaker) exposes two ALSA cards:

@@ -131,7 +131,7 @@ The face is a web page (`face/index.html`, three.js, CRT tube shader) shown by C
 - The mouth follows the loudness of the audio being played (`speak` event, built by `speech_envelope()`).
 - `Agent.run()` restarts Chromium if it exits (at most once per 30 s).
 - Tinker on a laptop with `python scripts/face_demo.py` (fake events) or by opening `face/index.html` as a file (demo buttons). Still frames: `?freeze=1&pose=happy&fx=0`.
-- Touch: a tap mutes, a 5 s press shuts down. The voice tuner was removed with the Tkinter display; a saved `voice_eq.json` still applies.
+- Touch: a tap mutes, a 5 s press shuts down.
 
 ### Observability
 

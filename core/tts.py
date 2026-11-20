@@ -381,11 +381,6 @@ class PiperSynthesizer:
         filtered = sosfilt(PiperSynthesizer._get_lpf(), samples)
         return np.clip(filtered, -32768, 32767).astype(np.int16).tobytes()
 
-    @classmethod
-    def invalidate_lpf(cls):
-        """Clear cached filter coefficients so next synthesis rebuilds from current config."""
-        cls._lpf_sos = None
-
     def synthesize(self, text: str) -> bytes:
         """Synthesize text to raw int16 PCM bytes at 22050Hz, with optional BMO lo-fi filter."""
         if self._use_library:
