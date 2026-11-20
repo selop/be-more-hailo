@@ -8,7 +8,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 
 | # | Question | Answer | Decided |
 |---|---|---|---|
-| D1 | Which German voice? | open. Asked for: ramona at medium quality. Piper publishes ramona only at low quality (checked against the official voice index, 2026-11-20). Medium or better German voices: kerstin-medium, thorsten-medium, thorsten-high, thorsten_emotional-medium, mls-medium (236 speakers). | open |
+| D1 | Which German voice? | `de_DE-ramona-low` for now (already in `[voice.de]` and installed on the Pi). Piper has no medium-quality ramona; kerstin-medium is the closest step up if it is revisited. | 2026-11-20 |
 | D2 | Who writes German replies: the local 1.5B model or the hosted one (Haiku, `LLM_BACKEND=cloud`)? | open | open |
 | D3 | Wake word | Keep the current model for now | 2026-11-20 |
 
@@ -16,9 +16,9 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 
 | # | Step | Depends on | Done when | Status |
 |---|---|---|---|---|
-| 1 | Voice audition: synthesise the same three German sentences with ramona-low and each medium/high candidate, play them on the Pi | – | The user has picked one by ear (D1) | todo |
+| 1 | Voice audition | – | – | dropped: the user chose ramona-low (D1) |
 | 2 | Measure German speech-to-text on the NPU: ten recorded German sentences through `bmoctl hear` | – | At least 8 of 10 transcripts are usable; numbers in the Log | todo |
-| 3 | Install the chosen voice and set it in `[voice.de]` | 1 | `BMO_LANGUAGE=de make say` speaks German with the chosen voice; the user confirms speed and tone | todo |
+| 3 | Confirm ramona-low in German mode on the Pi (speed 1.4 and the speaker filter) | – | `BMO_LANGUAGE=de make say` speaks German; the user confirms speed and tone | todo |
 | 4 | German timers and reminders in `core/timers.py` | 2 | New tests in `tests/test_timers.py` pass for "Stell einen Timer auf 5 Minuten" and "Erinnere mich in 10 Minuten an den Tee"; a `make say` turn starts a timer | todo |
 | 5 | German keywords for photo, picture, music and web search, moved into the character pack per language | 2 | Tests: "Mach ein Foto", "Spiel ein Lied", "Mal mir ein Bild von einer Katze", "Wie wird das Wetter morgen in Berlin?" each take the right route | todo |
 | 6 | Translate the seven lines missing from `[lines.de]` (`confused_reset`, `empty_reply`, `stream_error`, `think_error`, `vision_error`, `vision_missing`, `vision_timeout`) | – | A test fails when a key in `[lines.en]` has no German line | todo |
@@ -35,3 +35,4 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 - 2026-11-20: Six German requests tested against the current code (`parse_timer_request`, `detect_pre_llm_action`, `needs_web_search`): timer, reminder, photo, music, picture and weather were all unrecognised.
 - 2026-11-20: `[lines.de]` has 9 of the 16 lines in `[lines.en]`.
 - 2026-11-20: The repository has no `*_de` sound folders; the Pi has 28 sound files of unknown origin that may be them.
+- 2026-11-20: D1 decided: ramona-low for now. Step 1 dropped, step 3 reduced to a listening check.
