@@ -147,6 +147,14 @@ def test_german_timers_and_reminders():
     assert parse("Was sind fünf Minuten in Sekunden?") is None       # no timer word
 
 
+def test_german_reminder_is_said_back_in_the_second_person():
+    from core.timers import second_person
+    assert second_person("meine mutter anzurufen") == "deine mutter anzurufen"
+    assert second_person("den tee") == "den tee"
+    assert second_person("mir die zähne zu putzen") == "dir die zähne zu putzen"
+    assert second_person("call my mom") == "call your mom"            # English unchanged
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

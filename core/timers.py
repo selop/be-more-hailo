@@ -189,9 +189,12 @@ def second_person(text: str) -> str:
     """Turn the user's wording into what is said back to them:
     "call my mom" → "call your mom"."""
     swaps = {"my": "your", "i": "you", "i'm": "you're", "me": "you", "myself": "yourself", "mine": "yours"}
-    return re.sub(
+    text = re.sub(
         r"\b(?:i'm|myself|mine|my|me|i)\b",
         lambda m: swaps[m.group(0).lower()],
         text,
         flags=re.IGNORECASE,
     )
+    # German: "meine mutter anzurufen" → "deine mutter anzurufen". "ich" stays: its verb would need changing too.
+    text = re.sub(r"\bmein(e[nmrs]?)?\b", lambda m: "dein" + (m.group(1) or ""), text, flags=re.IGNORECASE)
+    return re.sub(r"\bmi(ch|r)\b", lambda m: "di" + m.group(1), text, flags=re.IGNORECASE)
