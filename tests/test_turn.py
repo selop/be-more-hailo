@@ -531,6 +531,46 @@ def with_fake_microphone(live, fn):
         return fn(audio_input)
     finally:
         audio_input.sd, audio_input.STALL_GRACE_SEC = saved
+        for stream in audio_input._stuck:       # let the abandoned fake readers end
+            stream.closed.set()
+        del audio_input._stuck[:]
+
+
+def test_live_stream_is_closed_only_after_the_reader_left_its_read():
+    from core import audio_input
+    order = []
+
+    class Stream(FakeMicStream):
+        def read(self, frames):
+            order.append("read-in")
+            try:
+                return super().read(frames)
+            finally:
+                order.append("read-out")
+
+        def close(self):
+            order.append("close")
+            super().close()
+
+    saved = FakeSoundDevice.InputStream
+    FakeSoundDevice.InputStream = Stream
+    try:
+        def use(a):
+            with a.Microphone(480) as mic:
+                mic.get(timeout=1)
+            return a.microphone_stuck()
+        assert with_fake_microphone(True, use) is False
+        assert order[-1] == "close" and order[-2] == "read-out", order[-4:]
+    finally:
+        FakeSoundDevice.InputStream = saved
+
+
+def test_dead_stream_is_left_open_and_reported_as_stuck():
+    def use(a):
+        with a.Microphone(480):
+            pass
+        return a.microphone_stuck(), [s.closed.is_set() for s in a._stuck]
+    assert with_fake_microphone(False, use) == (True, [False])
 
 
 def test_recorder_gives_up_when_the_microphone_delivers_nothing():

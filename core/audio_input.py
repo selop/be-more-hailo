@@ -36,7 +36,8 @@ class Microphone:
     def __enter__(self):
         self._stream = sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16')
         self._stream.start()
-        threading.Thread(target=self._read, daemon=True).start()
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
         return self
 
     def _read(self):
@@ -56,13 +57,29 @@ class Microphone:
         return self._blocks.get(timeout=timeout)
 
     def __exit__(self, *exc):
+        # The reader must be out of its read before the stream is closed: closing it under a
+        # running read crashed the whole process (SIGSEGV in PortAudio, twice on the device).
         self._stop.set()
-        for close in (self._stream.abort, self._stream.close):
-            try:
-                close()
-            except Exception:  # noqa: BLE001 - a stalled device may refuse; the reader thread is a daemon
-                pass
+        self._reader.join(timeout=1.0)
+        if self._reader.is_alive():
+            # Still inside a read: the stream is dead. It is left open on purpose and the
+            # agent has to be restarted (see microphone_stuck()).
+            _stuck.append(self._stream)
+            bmo_print("AUDIO", "Microphone stream is stuck in a read; it cannot be closed safely")
+            return False
+        try:
+            self._stream.close()
+        except Exception as e:  # noqa: BLE001
+            bmo_print("AUDIO", f"Closing the microphone stream failed: {e!r}")
         return False
+
+
+_stuck = []     # streams that could not be closed; kept so they are never garbage-collected (which closes them)
+
+
+def microphone_stuck() -> bool:
+    """True once a microphone stream had to be abandoned. Only a restart of the process recovers the device."""
+    return bool(_stuck)
 
 
 # Score of the most recent wake-word detection (read by the turn trace)

@@ -22,7 +22,7 @@ Nothing below is pushed. `main` equals `origin/main` (`d602e52`). The branches a
 
 `bugfix/datetime-shadow-screensaver` is an older unmerged branch with one commit; untouched.
 
-The Pi runs the tip of `perf/crt-single-face-pass`. 75 tests pass on the laptop and on the Pi.
+The Pi runs the tip of `perf/crt-single-face-pass`. 77 tests pass on the laptop and on the Pi.
 
 **Open decision for the user:** merge order and whether to push. The simplest is to fast-forward `main` to `perf/crt-single-face-pass`, since the branches are linear.
 
@@ -59,6 +59,7 @@ Limits to know:
 Ordered by how much they matter.
 
 1. **The microphone stream can go silent** (USB device open, no audio). Seen once, cause unknown, not reproducible in fifteen tries; no kernel errors. Both the wake-word loop and the recorder now notice it after 3 s, log a `mic_stalled` event and recover. If the user reports "stuck" or "does not hear me", look at `make events` first.
+   The first version of that recovery crashed the agent twice (SIGSEGV at 16:33 and 16:35): it closed the stream while the reader thread was still reading. Fixed the same afternoon (step 22 in the epic file): the reader is joined first, and a stream that cannot be closed makes the agent exit for a clean restart. The user took the crashes for Kokoro, which ran as a trial at the same time but was never connected to the agent. Real wake words through the fixed code have not been seen yet; `systemctl show bmo-gui -p NRestarts` tells you if it crashed again.
 2. **Heat.** `vcgencmd get_throttled` read `0xe0000` in the afternoon: the CPU was throttled at some point after 11:48. Likely during long thorsten-high synthesis runs with the fan trip raised to 65 °C. The face change on this branch cut GPU load from 60–68 % to 20–26 %, but its effect on temperature has not been measured on a settled board. Run `make monitor-60` after ten idle minutes. If it still runs hot: a lower frame rate while idle (15 fps was 30 % GPU with the old shader), or put the fan trip back.
 3. **Speech starts only after the whole reply is written** (INTENT-1 in `docs/weak-links.md`). With the hosted model the text arrives in about a second, so the cost is now mostly the first sentence's synthesis.
 4. **A reminder can talk over a reply**, and a muted (`--quiet`) music turn says "no songs loaded" (VOICE-1 and a note in the epic log).

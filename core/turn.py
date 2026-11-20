@@ -348,6 +348,10 @@ class Conversation:
         if not result and not self.stop_event.is_set():
             self.store.set_phase(Phase.ERROR)
             time.sleep(2)
+            if audio_input.microphone_stuck():
+                # The device no longer delivers audio and its stream cannot be closed: start over
+                trace.event("mic_stuck_restart")
+                self.ui.boot_failed(RuntimeError("the microphone stream is stuck"))
         return result
 
     def record_audio(self):
