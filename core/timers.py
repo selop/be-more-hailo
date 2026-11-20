@@ -3,7 +3,8 @@
 Pure functions, no hardware and no character text. The small on-device
 model does not reliably emit the timer action, so requests such as
 "set a timer for 90 seconds" or "remind me in ten minutes to call mom"
-are parsed here before the LLM is asked.
+are parsed here before the LLM is asked. English and German wording is
+recognised at the same time; the two vocabularies do not collide.
 """
 
 import re
@@ -12,6 +13,7 @@ _UNIT_SECONDS = {
     "second": 1, "seconds": 1, "sec": 1, "secs": 1,
     "minute": 60, "minutes": 60, "min": 60, "mins": 60,
     "hour": 3600, "hours": 3600, "hr": 3600, "hrs": 3600,
+    "sekunde": 1, "sekunden": 1, "minuten": 60, "stunde": 3600, "stunden": 3600,
 }
 
 _ONES = {
@@ -23,7 +25,17 @@ _NUMBER_WORDS = {
     "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
     "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
     "a couple of": 2, "couple of": 2, "a few": 3,
+    "ein": 1, "eine": 1, "einen": 1, "einer": 1, "eins": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5,
+    "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10, "elf": 11, "zwölf": 12, "dreizehn": 13,
+    "vierzehn": 14, "fünfzehn": 15, "sechzehn": 16, "siebzehn": 17, "achtzehn": 18, "neunzehn": 19,
+    "zwanzig": 20, "dreißig": 30, "vierzig": 40, "fünfzig": 50, "sechzig": 60, "siebzig": 70,
+    "achtzig": 80, "neunzig": 90, "anderthalb": 1.5, "eineinhalb": 1.5,
 }
+# "fünfundzwanzig": ones, "und", tens in one word
+_DE_ONES = {"ein": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6, "sieben": 7, "acht": 8, "neun": 9}
+_DE_TENS = {"zwanzig": 20, "dreißig": 30, "vierzig": 40, "fünfzig": 50, "sechzig": 60, "siebzig": 70,
+            "achtzig": 80, "neunzig": 90}
+_DE_COMPOUND_RE = rf"(?:{'|'.join(_DE_ONES)})und(?:{'|'.join(_DE_TENS)})"
 _TENS = {
     "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
     "seventy": 70, "eighty": 80, "ninety": 90,
@@ -34,7 +46,8 @@ _TENS_RE = "|".join(_TENS)
 _ONES_RE = "|".join(_ONES)
 _WORDS_RE = "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
 _NUMBER = (
-    r"(?P<num>\d+(?:\.\d+)?"
+    r"(?P<num>\d+(?:[.,]\d+)?"
+    rf"|{_DE_COMPOUND_RE}"
     rf"|(?:{_TENS_RE})(?:[ -](?:{_ONES_RE}))?"
     rf"|{_WORDS_RE})"
 )
@@ -44,23 +57,33 @@ _AMOUNT_RE = re.compile(
     rf"\b{_NUMBER}(?P<half_before> and a half)?[ -]{_UNIT}(?P<half_after> and a half)?"
 )
 # "half an hour", "half a minute"
-_HALF_RE = re.compile(rf"\bhalf (?:an?|of an?) {_UNIT}")
+_HALF_RE = re.compile(rf"\b(?:half (?:an?|of an?)|(?:eine )?halbe) {_UNIT}")
+# German fixed amounts in one word
+_DE_FIXED = {"dreiviertelstunde": 2700, "viertelstunde": 900}
+_DE_FIXED_RE = re.compile(r"\b(?:eine )?(dreiviertelstunde|viertelstunde)\b")
 
-_TIMER_RE = re.compile(r"\b(?:timer|countdown)\b")
-_REMIND_RE = re.compile(r"\bremind me\b")
-_WAKE_RE = re.compile(r"\bwake me\b")
+_TIMER_RE = re.compile(r"\b(?:timer|countdown|wecker)\b")
+# "\w*inner\w* mich" also catches what speech-to-text makes of "Erinnere mich"
+# ("der inneren mich", "dainnere mich"); a duration is still required.
+_REMIND_RE = re.compile(r"\b(?:remind me|\w*inner\w* mich)\b")
+_WAKE_RE = re.compile(r"\b(?:wake me|wecke? mich)\b")
 # Requests about a timer that are not "start one"
-_NOT_A_START_RE = re.compile(r"\b(?:cancel|stop|delete|remove|clear|how long|how much|what is|what's)\b")
+_NOT_A_START_RE = re.compile(
+    r"\b(?:cancel|stop|delete|remove|clear|how long|how much|what is|what's"
+    r"|stopp\w*|lösch\w*|abbrechen|brich|beende\w*|wie lange|wie viel)\b")
 
 MAX_SECONDS = 24 * 3600
 
 
 def _number_value(text: str) -> float:
     text = text.strip()
-    if re.fullmatch(r"\d+(?:\.\d+)?", text):
-        return float(text)
+    if re.fullmatch(r"\d+(?:[.,]\d+)?", text):
+        return float(text.replace(",", "."))
     if text in _NUMBER_WORDS:
         return float(_NUMBER_WORDS[text])
+    if re.fullmatch(_DE_COMPOUND_RE, text):
+        ones, tens = text.split("und", 1)
+        return float(_DE_ONES[ones] + _DE_TENS[tens])
     parts = re.split(r"[ -]", text)
     return float(_TENS[parts[0]] + (_ONES[parts[1]] if len(parts) > 1 else 0))
 
@@ -72,6 +95,9 @@ def find_durations(text: str) -> tuple[float, list[tuple[int, int]]]:
     spans = []
     for m in _HALF_RE.finditer(text):
         total += 0.5 * _UNIT_SECONDS[m.group("unit")]
+        spans.append(m.span())
+    for m in _DE_FIXED_RE.finditer(text):
+        total += _DE_FIXED[m.group(1)]
         spans.append(m.span())
     for m in _AMOUNT_RE.finditer(text):
         if any(s <= m.start() < e for s, e in spans):
@@ -112,10 +138,11 @@ def parse_timer_request(user_text: str) -> tuple[float, str | None] | None:
         # Remove the "in ten minutes" parts, then take what follows "remind me to"
         rest = text
         for start, end in reversed(spans):
-            head = re.sub(r"\b(?:in|after|and)\s*$", "", rest[:start])
+            head = re.sub(r"\b(?:in|after|and|nach|und)\s*$", "", rest[:start])
             rest = head + " " + rest[end:]
         rest = re.sub(r"\s+", " ", rest).strip()
-        m = re.search(r"\bremind me (?:to|that|about|of)\s+(.+)$", rest)
+        m = (re.search(r"\bremind me (?:to|that|about|of)\s+(.+)$", rest)
+             or re.search(r"inner\w* mich (?:bitte )?(?:daran |an |dass |zu )?(.+)$", rest))
         if m:
             reminder = m.group(1).strip(" .") or None
     return seconds, reminder

@@ -125,6 +125,28 @@ def test_confirmation_lines_exist_in_every_language():
         assert "${" not in CHARACTER.say("reminder", language, message="x")
 
 
+def test_german_timers_and_reminders():
+    from core.timers import parse_timer_request as parse
+    assert parse("Stell einen Timer auf 5 Minuten.") == (300, None)
+    assert parse("Stell einen Timer auf fünf Minuten") == (300, None)
+    assert parse("Timer für fünfundzwanzig Sekunden") == (25, None)
+    assert parse("Stell den Timer auf eine halbe Stunde") == (1800, None)
+    assert parse("Timer auf anderthalb Stunden") == (5400, None)
+    assert parse("Timer auf eine Viertelstunde") == (900, None)
+    assert parse("Stell einen Timer auf 2,5 Minuten") == (150, None)
+    assert parse("Weck mich in zwei Stunden") == (7200, None)
+    assert parse("Erinnere mich in zehn Minuten an den Tee.") == (600, "den tee")
+    assert parse("Erinnere mich in 10 Minuten daran, den Müll rauszubringen") == (600, "den müll rauszubringen")
+    # What speech-to-text made of "Erinnere mich" in the measurement
+    assert parse("der inneren mich in 10 Minuten an den Tee.") == (600, "den tee")
+    assert parse("Dainnere mich in zehn Minuten an den Tee.") == (600, "den tee")
+    # Not a request to start one
+    assert parse("Stopp den Timer") is None
+    assert parse("Wie lange läuft der Timer noch?") is None
+    assert parse("Ich erinnere mich an den Urlaub") is None          # no duration
+    assert parse("Was sind fünf Minuten in Sekunden?") is None       # no timer word
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
