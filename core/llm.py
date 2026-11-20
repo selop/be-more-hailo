@@ -200,7 +200,9 @@ class Brain:
                     full_content += token
 
                     # If buffer ends with punctuation or newline, yield it
-                    if any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer:
+                    # An action's JSON stays in one piece: cut in two it cannot be parsed and gets spoken
+                    in_json = buffer.count("{") > buffer.count("}")
+                    if not in_json and (any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer):
                         cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
                         out_chunk = "" if tag_seen else CHARACTER.normalize_name(cleaned)
                         tag_seen = tag_seen or strip_pronunciation_tag(buffer) != buffer.strip()

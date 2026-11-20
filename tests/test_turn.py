@@ -15,6 +15,7 @@ os.environ["TRACE_DIR"] = tempfile.mkdtemp(prefix="bmo-test-trace-")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+os.environ["LLM_BACKEND"] = "local"      # a device's .env may select the hosted model; tests never call it
 
 from core import trace, tts, turn  # noqa: E402
 from core.control import ControlServer  # noqa: E402

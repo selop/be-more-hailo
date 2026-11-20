@@ -11,6 +11,7 @@ os.environ["TRACE_DIR"] = tempfile.mkdtemp(prefix="bmo-test-trace-")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+os.environ["LLM_BACKEND"] = "local"      # a device's .env may select the hosted model; tests never call it
 
 from core import llm  # noqa: E402
 
@@ -141,6 +142,21 @@ def test_cloud_backend_answers_and_falls_back_to_local_when_it_fails():
         assert [c.strip() for c in llm.Brain().stream_think("hi")] == ["Local answer."]
     finally:
         llm._get_llm, llm._prepare_prompt, llm.LLM_BACKEND, llm.cloud_llm.stream = saved
+
+
+def test_action_json_after_a_blank_line_is_not_cut_in_two():
+    saved = (llm._get_llm, llm._prepare_prompt)
+    llm._prepare_prompt = lambda history: history
+    fake = FakeLLM("")
+    # As the hosted model wrote it on the device: a blank line, then the action
+    fake.tokens = ["Timer", " kommt!", "\n\n{\"action\":", " \"set_timer\",", " \"minutes\":", " 0.0833,",
+                   " \"message\":", " \"Timer", " is", " up!\"}"]
+    llm._get_llm = lambda: fake
+    try:
+        chunks = [c.strip() for c in llm.Brain().stream_think("erzähl was")]
+        assert chunks == ["Timer kommt!", '{"action": "set_timer", "minutes": 0.0833, "message": "Timer is up!"}'], chunks
+    finally:
+        llm._get_llm, llm._prepare_prompt = saved
 
 
 if __name__ == "__main__":
