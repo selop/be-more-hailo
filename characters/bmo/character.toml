@@ -211,27 +211,34 @@ reminder = "BMO has a reminder for you: ${message}!"
 [lines.de]
 timer_set = [
     "Okay! BMO hat einen Timer auf ${duration} gestellt.",
-    "Timer laeuft! BMO sagt in ${duration} Bescheid.",
+    "Timer läuft! BMO sagt in ${duration} Bescheid.",
 ]
 timer_done = "Der Timer ist abgelaufen!"
-reminder = "BMO hat eine Erinnerung fuer dich: ${message}!"
+reminder = "BMO hat eine Erinnerung für dich: ${message}!"
 music_intros = [
     "Oh ja! BMO legt jetzt los!",
-    "Zeit fuer Musik! La la la!",
+    "Zeit für Musik! La la la!",
     "BMO liebt dieses Lied!",
     "BMO spielt dir was vor!",
     "Musikzeit! BMO ist so aufgeregt!",
 ]
-no_music = "BMO moechte Musik spielen, aber es sind keine Lieder geladen!"
+no_music = "BMO möchte Musik spielen, aber es sind keine Lieder geladen!"
 camera_intros = [
     "BMO aktiviert den Kameramodus!",
     "Fotomodul wird geladen, einen Moment bitte!",
     "Sag Cheese! BMO macht ein Foto!",
-    "Fotozeit! Halt still fuer BMO!",
-    "BMOs Kamera waermt sich auf!",
+    "Fotozeit! Halt still für BMO!",
+    "BMOs Kamera wärmt sich auf!",
     "Ooh, lass BMO mal schauen!",
-    "Laecheln! BMO macht gleich ein Bild!",
+    "Lächeln! BMO macht gleich ein Bild!",
 ]
 no_camera = "Hmm, BMO hat gerade keine Kamera angeschlossen. Ich kann kein Foto machen!"
 camera_error = "Ich habe versucht ein Foto zu machen, aber meine Kamera funktioniert nicht."
-draw_image = "Ooh, lass BMO etwas fuer dich zeichnen!"
+draw_image = "Ooh, lass BMO etwas für dich zeichnen!"
+empty_reply = "BMO ist da! Wie kann ich helfen?"
+confused_reset = "BMO ist ein bisschen durcheinander gekommen! Fangen wir neu an. Wie kann ich helfen?"
+think_error = "Ich kann gerade nicht richtig denken."
+stream_error = "Bei mir klappt gerade etwas nicht."
+vision_missing = "BMOs Sehmodell ist noch nicht installiert. Starte setup.sh, um es herunterzuladen!"
+vision_timeout = "BMO hat zu lange geschaut und ihm ist schwindelig geworden! Nochmal versuchen?"
+vision_error = "Ich wollte schauen, aber meine Augen funktionieren gerade nicht."

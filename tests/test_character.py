@@ -105,7 +105,7 @@ def test_name_normalisation_and_lines():
     assert c.normalize_name("beemoth") == "beemoth"          # whole words only
     assert isinstance(c.line("camera_intros", "en"), list)
     assert c.say("camera_intros", "de") in c.line("camera_intros", "de")
-    assert c.line("vision_error", "de") == c.line("vision_error", "en")   # falls back to English
+    assert c.line("vision_error", "fr") == c.line("vision_error", "en")   # an unknown language falls back to English
     assert c.line("not_a_key", "en") == "not_a_key"
 
 
@@ -154,6 +154,13 @@ def test_swapping_the_character_changes_engine_text():
         assert out.returncode == 0 and "swap ok" in out.stdout, out.stderr[-800:]
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_every_spoken_line_exists_in_every_language_of_the_pack():
+    lines = load_character("bmo")._data["lines"]
+    for language, table in lines.items():
+        missing = sorted(set(lines["en"]) - set(table))
+        assert not missing, f"[lines.{language}] lacks {missing}"
 
 
 if __name__ == "__main__":
