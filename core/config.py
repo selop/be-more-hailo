@@ -24,8 +24,14 @@ LLM_HEF_PATH = os.environ.get("LLM_HEF_PATH", "./models/Qwen2.5-1.5B-Instruct.he
 # The HEF file is a precompiled model binary from Hailo's model zoo
 VLM_HEF_PATH = os.environ.get("VLM_HEF_PATH", "./models/Qwen2-VL-2B-Instruct.hef")
 
+_DE_WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+_DE_MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September",
+              "Oktober", "November", "Dezember"]
+
 _LANGUAGE_RULES = {
-    "de": "You MUST respond ONLY in German (Deutsch) at all times. Never use Chinese characters or English, regardless of the prompt. ",
+    "de": "You MUST respond ONLY in German (Deutsch) at all times. Never use Chinese characters or English, regardless of the prompt. "
+          "Address the user informally with 'du'. Write reminder and timer messages in German too. "
+          "Keep the JSON actions and the pronunciation tag exactly as specified, with their English keys. ",
     "en": "You MUST respond ONLY in English at all times. Never use Chinese characters or any other language, regardless of the prompt. ",
 }
 
@@ -34,10 +40,16 @@ def get_system_prompt():
     """Build the system prompt from the character pack with the current
     time, date and language rule filled in."""
     now = datetime.datetime.now()
+    if LANGUAGE == "de":
+        # Spelled out here: strftime names follow the system locale, which is English on the device
+        time_text = now.strftime("%H:%M Uhr")
+        date_text = f"{_DE_WEEKDAYS[now.weekday()]}, {now.day}. {_DE_MONTHS[now.month - 1]} {now.year}"
+    else:
+        time_text, date_text = now.strftime("%I:%M %p"), now.strftime("%A, %B %d, %Y")
     return CHARACTER.prompt(
         "system",
-        time=now.strftime("%I:%M %p"),
-        date=now.strftime("%A, %B %d, %Y"),
+        time=time_text,
+        date=date_text,
         language_rule=_LANGUAGE_RULES["de" if LANGUAGE == "de" else "en"],
     )
 
