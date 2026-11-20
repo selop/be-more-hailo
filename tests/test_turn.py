@@ -376,7 +376,9 @@ def test_mute_stops_playback_and_unmute_returns_to_idle():
             turn.subprocess = saved
 
 
-def test_screensaver_shows_an_idle_face_then_returns():
+def screensaver_tick(rolls):
+    """Run one Screensaver.tick() at noon after a long idle, with the given
+    dice rolls. Returns what it did, in order, and the screensaver."""
     import datetime as real_datetime
     from core import screensaver as module
 
@@ -396,38 +398,49 @@ def test_screensaver_shows_an_idle_face_then_returns():
                 return real_datetime.datetime(2026, 1, 1, 12, 0)
 
     class Dice:
-        rolls = [0.05, 0.5]                   # an idle face, then no spoken thought
-
         @staticmethod
         def random():
-            return Dice.rolls.pop(0)
+            return rolls.pop(0)
 
         @staticmethod
         def choice(items):
             return sorted(items)[0]
 
-    store, states = StateStore(), []
+    store, did = StateStore(), []
 
     def set_state(name, msg=""):
-        states.append(name)
+        did.append(name)
         try:
             store.set_phase(Phase(name), msg=msg)
         except ValueError:
             store.set_expression(name)
 
-    saver = module.Screensaver(store=store, set_state=set_state, speak=lambda *a, **k: states.append("spoke"),
+    saver = module.Screensaver(store=store, set_state=set_state, speak=lambda text, msg="": did.append(("spoke", text)),
                                show_image=None, get_llm=lambda: None, stop_event=threading.Event())
     saved = (module.time, module.datetime, module.random)
     module.time, module.datetime, module.random = Clock, Noon, Dice
     try:
         saver.tick()                          # not in the screensaver phase: nothing
-        assert states == []
+        assert did == []
         store.set_phase(Phase.SCREENSAVER)
         saver.tick()
-        face = sorted(module.CHARACTER.idle_expressions)[0]
-        assert states == [face, "screensaver"]
     finally:
         module.time, module.datetime, module.random = saved
+    return did, saver
+
+
+def test_screensaver_shows_an_idle_face_then_returns():
+    from core.config import CHARACTER
+    did, _ = screensaver_tick([0.05, 0.5])                 # an idle face, then no spoken thought
+    assert did == [sorted(CHARACTER.idle_expressions)[0], "screensaver"]
+
+
+def test_screensaver_speaks_one_stock_line_when_the_model_is_not_loaded():
+    from core.config import CHARACTER
+    before = time.time()
+    did, saver = screensaver_tick([0.5, 0.5, 0.01])        # no face, no gag, a spoken thought
+    assert did == [("spoke", sorted(CHARACTER.fallback_phrases)[0]), "screensaver"]
+    assert saver.last_audio_time > before + 3000           # stamped, so the next thought waits
 
 
 if __name__ == "__main__":
