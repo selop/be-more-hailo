@@ -141,10 +141,18 @@ class DisplayServer:
         return True
 
     def ensure_browser(self):
-        """Start Chromium again if it has exited: it is the only display."""
-        # shortcut: one retry per 30 s, no give-up; add a limit if a broken install floods the log
-        if self._browser is not None and self._browser.poll() is not None and time.time() - self._browser_started > 30:
+        """Start Chromium again if it has exited, or if its page never
+        connected (seen at boot: a blank window). It is the only display."""
+        # shortcut: retries forever at these intervals; add a limit if a broken install floods the log
+        if self._browser is None:
+            return
+        age = time.time() - self._browser_started
+        if self._browser.poll() is not None and age > 30:
             bmo_print("FACE", "Chromium exited; starting it again")
+            self.open_browser()
+        elif self.connected == 0 and age > 120:
+            bmo_print("FACE", "The face page never connected; restarting Chromium")
+            self.close_browser()
             self.open_browser()
 
     def close_browser(self):

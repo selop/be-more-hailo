@@ -118,6 +118,13 @@ class Agent(TurnUI):
             stop_thinking_audio=self.conversation.stop_thinking_audio,
         )
 
+        # The face first: reading the models from disk starves Chromium's own
+        # start, which at boot left a blank window for minutes.
+        deadline = time.time() + 90
+        while self.display.connected == 0 and time.time() < deadline:
+            time.sleep(0.5)
+        bmo_print("FACE", "Page connected" if self.display.connected else "Page not connected after 90 s; loading the models anyway")
+
         threading.Thread(target=self.conversation.run, daemon=True).start()
         self.last_screensaver_audio_time = time.time()
         threading.Thread(target=self.screensaver_audio_loop, daemon=True).start()

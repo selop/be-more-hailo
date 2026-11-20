@@ -189,6 +189,26 @@ def test_browser_is_restarted_once_it_has_exited():
     assert opened == [1]
 
 
+def test_browser_is_restarted_when_its_page_never_connects():
+    class Running:
+        def poll(self):
+            return None
+    display = DisplayServer(port=0)
+    opened, closed = [], []
+    display.open_browser = lambda: opened.append(1)
+    display.close_browser = lambda: closed.append(1)
+    display._browser = Running()
+    display._browser_started = time.time() - 40
+    display.ensure_browser()                    # still loading: leave it
+    assert opened == []
+    display._browser_started = time.time() - 121
+    display.ensure_browser()                    # two minutes without a page: blank window
+    assert (opened, closed) == ([1], [1])
+    display._clients.append(object())           # a page is connected: healthy
+    display.ensure_browser()
+    assert opened == [1]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
