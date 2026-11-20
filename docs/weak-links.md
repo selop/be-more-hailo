@@ -11,17 +11,18 @@ Last sweep: 2026-11-19. The web interface was removed the same day; WEB-1 was dr
 | 3 | NPU-1 | A failed photo leaves models unloaded; nothing locks the NPU | NPU runtime | open |
 | 4 | TEST-1 | No utterance eval set; tests cover only part of the engine | Intent, Brain | partly fixed |
 | 5 | INTENT-2 | Intent routing misfires on substrings | Intent | open |
-| 6 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | open |
+| 6 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | fixed (uncommitted), awaiting a spoken check |
 | 7 | BRAIN-2 | Pronunciation learning does not work on the device | Brain | open |
 | 8 | FACE-1 | A generated image is never cleared | Face | fixed (uncommitted) |
 | 9 | VOICE-1 | A reply cannot be cancelled; speakers cut each other off | Voice, Conversation | open |
-| 10 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | open |
+| 10 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | partly fixed (uncommitted) |
 | 11 | HEAR-3 | Hearing failures are silent | Hearing, Conversation | open |
 | 12 | BRAIN-3 | No persistent memory; timers lost on restart | Brain, Conversation | open |
 | 13 | PLAT-1 | Boot runs pip; cold boot takes about five minutes | Platform | partly fixed |
 | 14 | FACE-2 | Emotion faces requested by the LLM are overwritten before they show | Face, Conversation | open |
 | 15 | INTENT-3 | Timers did not work: the LLM does not emit the timer action | Intent, Brain | fixed (uncommitted) |
 | 16 | CHAR-1 | The character was hardcoded across the engine | all | fixed (uncommitted) |
+| 17 | FACE-3 | The Tkinter shell class does five jobs, so display changes touch conversation behaviour | Face, Conversation, Platform | partly fixed (uncommitted) |
 
 ## INTENT-3. Timers did not work (fixed 2026-11-19, uncommitted)
 Was: "set a timer for 90 seconds" got "I'm sorry, I can't do that" and no timer, twice, because the feature depended on the 1.5B model emitting the timer action.
@@ -123,3 +124,34 @@ Still open:
 
 - **Web search feeds news to weather questions.** "What's the weather today in ... Germany?" returned a travel article and the reply was about "remote small towns in the UK" (`core/search.py` tries news first).
 - **Reply quality of the 1.5B model.** "Tell me something nice" produced "Sure, let me know something nice! How about you tell them?". Use `scripts/bmo-remote.sh say` with a fixed set of prompts to compare models after the HailoRT upgrade.
+
+## FACE-3. The Tkinter shell class does five jobs
+
+Domain: Face (seams with Conversation and Platform). Found 2026-11-20, read from code.
+
+`BotGUI` (`agent_hailo.py:90`, 403 lines, 26 methods) is at once:
+
+1. the place everything is built and started (`agent_hailo.py:110-125`, `210-221`);
+2. the Tkinter widgets (`130-171`);
+3. the bridge to the live face, including replacing `bubble.show`/`hide` at run time (`238-249`) and a second publish in each display callback (`399-414`);
+4. behaviour that is not display: mute stops audio and reverts phases (`314-345`), shutdown, exit on boot failure (`428-434`), how long a picture stays (`436-454`);
+5. host of the screensaver, wired with 16 callbacks (`475-492`). The idle-to-screensaver timer sits in `AnimationEngine.update()` (`core/animation.py`), a class whose frames no longer exist.
+
+Cost: no user-visible fault today. Mute, shutdown and the screensaver cannot be tested without Tkinter, and every display change is made twice (window and page).
+
+Smallest fix: move jobs 4 and 5 into `core/` (mute and picture lifetime to `Conversation`, a `Screensaver` class that owns its timer), build the objects in a `main()`, and split the display into a Tk one and a web one behind `TurnUI`. Dropping the Tk display afterwards is then a deletion; it is blocked by the voice tuner and by pictures being stored as `ImageTk` objects.
+
+Partly fixed 2026-11-20 (uncommitted; run on the Pi: turn, mute, screensaver, photo on screen, Chromium restart): the Tkinter display is gone. `core/animation.py`, `bubble.py`, `meter.py`, `timer_clock.py` and `voice_eq.py` (the voice tuner) are deleted; `BotGUI` became `Agent` (about 230 lines), which only publishes to the live face. The idle-to-screensaver timer is in `Agent.run()`, which also restarts Chromium if it exits. Still in `Agent`: mute, shutdown and the screensaver wiring.
+
+Observed 2026-11-20:
+
+- The 30 fps cap made the face strobe purple. The springs in `face/index.html` (`Eased.step`) took one integration step per frame and diverged once speed × frame time neared 1 (mouth while speaking at 33 ms). Measured: alternate frames at brightness 68 instead of 168. Fixed by sub-stepping; 264 captured frames across a turn and a mute toggle show none.
+- The first photo after a reboot fails: the vision model's child process hit its 90 s limit (`core/llm.py:348`) about 12 minutes after boot. Likely the 2.3 GB model being read from the SD card for the first time (the language model took 329 s on the same boot); not confirmed.
+- The picture service returned HTTP 503 and 402 for two requests, so generated pictures could not be checked.
+
+HEAR-1 and HEAR-2, 2026-11-20:
+
+- Measured on the 13 kept recordings: with the fan on its loud step the room's noise floor is 220 to 245 (RMS), up from 105 to 140, and every recording since then ran to the 30 s limit (7 of 7; one of them had people talking throughout). The driver delivered blocks of 12 to 46 frames, so the old threshold and the "40 chunks" wait meant nothing fixed.
+- Fix: `Endpointer` in `core/audio_input.py`. Blocks are pinned to 30 ms, levels are RMS, speech is anything above twice the noise floor the mic monitor measured before the wake word (at least 300), and a recording ends 0.9 s after speech stops, after 4 s without speech, or at 15 s. Replayed on the kept recordings it ends the 30 s ones after 2.2 to 4.6 s and leaves the short ones as they were. `SILENCE_THRESHOLD` is gone.
+- Wake word: the 48 to 16 kHz step now uses `resample_poly` instead of dropping samples. Effect on wake scores not measured; there are no wake-word recordings to replay.
+- Not done: one always-on mic stream (the gap between wake word and recording remains). Not yet confirmed with a spoken turn on the device.

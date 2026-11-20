@@ -336,6 +336,24 @@ def test_boot_failure_is_reported_instead_of_hanging():
         assert h.store.phase == Phase.ERROR
 
 
+def test_recording_ends_after_speech_even_in_a_loud_room():
+    from core.audio_input import Endpointer
+
+    def seconds_recorded(levels, floor):
+        e = Endpointer(floor)
+        for n, level in enumerate(levels, 1):
+            if e.feed(level, 0.03):
+                return round(n * 0.03, 1), e.ended, e.spoke
+        return None
+
+    room = 240                                              # the fan on its loud step
+    speech = [room] * 20 + [1200] * 50 + [room + 60] * 400   # 0.6 s wait, 1.5 s speech, then the fan
+    assert seconds_recorded(speech, room) == (3.0, "silence", True)
+    assert seconds_recorded([room + 60] * 400, room) == (4.0, "no_speech", False)
+    assert seconds_recorded([room] * 20 + [5000] + [room] * 400, room) == (4.0, "no_speech", False)   # a click
+    assert seconds_recorded([1200] * 1000, room) == (15.0, "max", True)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

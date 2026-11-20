@@ -84,8 +84,8 @@ def print_turn(turn: dict):
     )
     if turn.get("mic"):
         m = turn["mic"]
-        print(f"  mic:        {m.get('seconds')}s recorded, block={m.get('block_frames')} frames, "
-              f"max_volume={m.get('max_volume')} (threshold {m.get('silence_threshold')})")
+        print(f"  mic:        {m.get('seconds')}s recorded, ended by {m.get('ended')}, "
+              f"max level {m.get('max_level')} (threshold {m.get('threshold')}, noise floor {m.get('noise_floor')})")
     if turn.get("wake_score") is not None:
         print(f"  wake score: {turn['wake_score']}")
     if turn.get("phases"):

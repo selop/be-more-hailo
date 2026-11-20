@@ -105,7 +105,6 @@ MIC_DEVICE_INDEX = int(os.environ.get("MIC_DEVICE_INDEX", "1"))
 MIC_SAMPLE_RATE = 48000
 WAKE_WORD_MODEL = CHARACTER.asset("wakeword")
 WAKE_WORD_THRESHOLD = CHARACTER.wake_threshold if CHARACTER.wake_threshold is not None else 0.35
-SILENCE_THRESHOLD = int(os.environ.get("SILENCE_THRESHOLD", "50000"))
 
 # UI Settings
 # Which face to show: "web" = the live three.js face in a local browser on top
