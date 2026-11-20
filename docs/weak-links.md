@@ -11,18 +11,18 @@ Last sweep: 2026-11-19. The web interface was removed the same day; WEB-1 was dr
 | 3 | NPU-1 | A failed photo leaves models unloaded; nothing locks the NPU | NPU runtime | open |
 | 4 | TEST-1 | No utterance eval set; tests cover only part of the engine | Intent, Brain | partly fixed |
 | 5 | INTENT-2 | Intent routing misfires on substrings | Intent | open |
-| 6 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | fixed (uncommitted), awaiting a spoken check |
+| 6 | HEAR-1 | End-of-speech detection runs in undefined units | Hearing | fixed |
 | 7 | BRAIN-2 | Pronunciation learning does not work on the device | Brain | open |
 | 8 | FACE-1 | A generated image is never cleared | Face | fixed (uncommitted) |
 | 9 | VOICE-1 | A reply cannot be cancelled; speakers cut each other off | Voice, Conversation | open |
-| 10 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | partly fixed (uncommitted) |
+| 10 | HEAR-2 | Aliased wake-word audio; speech lost between two mic streams | Hearing | partly fixed |
 | 11 | HEAR-3 | Hearing failures are silent | Hearing, Conversation | open |
 | 12 | BRAIN-3 | No persistent memory; timers lost on restart | Brain, Conversation | open |
 | 13 | PLAT-1 | Boot runs pip; cold boot takes about five minutes | Platform | partly fixed |
 | 14 | FACE-2 | Emotion faces requested by the LLM are overwritten before they show | Face, Conversation | open |
 | 15 | INTENT-3 | Timers did not work: the LLM does not emit the timer action | Intent, Brain | fixed (uncommitted) |
 | 16 | CHAR-1 | The character was hardcoded across the engine | all | fixed (uncommitted) |
-| 17 | FACE-3 | The Tkinter shell class does five jobs, so display changes touch conversation behaviour | Face, Conversation, Platform | partly fixed (uncommitted) |
+| 17 | FACE-3 | The Tkinter shell class does five jobs, so display changes touch conversation behaviour | Face, Conversation, Platform | partly fixed |
 
 ## INTENT-3. Timers did not work (fixed 2026-11-19, uncommitted)
 Was: "set a timer for 90 seconds" got "I'm sorry, I can't do that" and no timer, twice, because the feature depended on the 1.5B model emitting the timer action.
@@ -155,3 +155,10 @@ HEAR-1 and HEAR-2, 2026-11-20:
 - Fix: `Endpointer` in `core/audio_input.py`. Blocks are pinned to 30 ms, levels are RMS, speech is anything above twice the noise floor the mic monitor measured before the wake word (at least 300), and a recording ends 0.9 s after speech stops, after 4 s without speech, or at 15 s. Replayed on the kept recordings it ends the 30 s ones after 2.2 to 4.6 s and leaves the short ones as they were. `SILENCE_THRESHOLD` is gone.
 - Wake word: the 48 to 16 kHz step now uses `resample_poly` instead of dropping samples. Effect on wake scores not measured; there are no wake-word recordings to replay.
 - Not done: one always-on mic stream (the gap between wake word and recording remains). Not yet confirmed with a spoken turn on the device.
+
+Measured on the Pi (SD card install), 2026-11-20:
+
+- HEAR-1 confirmed with four spoken turns: recordings of 2.4 to 3.5 s, all ended by silence, noise floor 163 to 185, no invented trailing words.
+- Fan: `dtparam=fan_temp1=65000` in `/boot/firmware/config.txt` (device setting, not in this repository; backup beside it). Over four minutes with the live face the fan stayed on step 1 (about 3,930 rpm), CPU 59.0 to 62.8 C, mic noise floor about 173 (was 240 to 255 on step 2).
+- PLAT-1, cold boot: the model files had been on the SD card for a year and read at 8 to 10 MB/s; the raw card and a fresh copy of the same data read at about 90 MB/s. Rewriting the files in place (copy, compare, rename) cut the model load on a cold boot from about 357 s to 58 s. Power-on to "Ready" is now about 3 minutes; the rest is the desktop, Python imports and Chromium's first start. Slow reads of old data can be an early sign of a wearing card.
+- At boot the model read starved Chromium and left a blank window. The agent now waits for the face page before loading the models.
