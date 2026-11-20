@@ -159,6 +159,19 @@ def test_action_json_after_a_blank_line_is_not_cut_in_two():
         llm._get_llm, llm._prepare_prompt = saved
 
 
+def test_blank_line_ends_the_chunk_before_it():
+    saved = (llm._get_llm, llm._prepare_prompt)
+    llm._prepare_prompt = lambda history: history
+    fake = FakeLLM("")
+    fake.tokens = ['{"action":', ' "set_expression",', ' "value":', ' "happy"}', "\n\nYay,", " congratulations!", " More."]
+    llm._get_llm = lambda: fake
+    try:
+        chunks = [c.strip() for c in llm.Brain().stream_think("i won")]
+        assert chunks == ['{"action": "set_expression", "value": "happy"}', "Yay, congratulations!", "More."], chunks
+    finally:
+        llm._get_llm, llm._prepare_prompt = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

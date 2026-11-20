@@ -9,7 +9,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | # | Question | Answer | Decided |
 |---|---|---|---|
 | D1 | Which German voice? | `de_DE-ramona-low` for now (already in `[voice.de]` and installed on the Pi). Piper has no medium-quality ramona; kerstin-medium is the closest step up if it is revisited. | 2026-11-20 |
-| D2 | Who writes German replies: the local 1.5B model or the hosted one (Haiku, `LLM_BACKEND=cloud`)? | open | open |
+| D2 | Who writes German replies: the local 1.5B model or the hosted one (Haiku, `LLM_BACKEND=cloud`)? | Hosted (Haiku). Inferred: the user set `LLM_BACKEND=cloud` and a key in the Pi's `.env` on 2026-11-20; not said in words. | 2026-11-20 (inferred) |
 | D3 | Wake word | Keep the current model for now | 2026-11-20 |
 
 ## Steps
@@ -19,7 +19,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 1 | Voice audition | – | – | dropped: the user chose ramona-low (D1) |
 | 2 | Measure German speech-to-text on the NPU with ten German sentences | – | At least 8 of 10 transcripts are usable; numbers in the Log | done (measurement only, see Log) |
 | 3 | Confirm ramona-low in German mode on the Pi (speed 1.4 and the speaker filter) | – | `BMO_LANGUAGE=de make say` speaks German; the user confirms speed and tone | todo |
-| 4 | German timers and reminders in `core/timers.py` | 2 | New tests in `tests/test_timers.py` pass for "Stell einen Timer auf 5 Minuten" and "Erinnere mich in 10 Minuten an den Tee"; a `make say` turn starts a timer | todo |
+| 4 | German timers and reminders in `core/timers.py` | 2 | New tests in `tests/test_timers.py` pass for "Stell einen Timer auf 5 Minuten" and "Erinnere mich in 10 Minuten an den Tee"; a `make say` turn starts a timer | done 6f2c79a |
 | 5 | German keywords for photo, picture, music and web search, moved into the character pack per language | 2 | Tests: "Mach ein Foto", "Spiel ein Lied", "Mal mir ein Bild von einer Katze", "Wie wird das Wetter morgen in Berlin?" each take the right route | todo |
 | 6 | Translate the seven lines missing from `[lines.de]` (`confused_reset`, `empty_reply`, `stream_error`, `think_error`, `vision_error`, `vision_missing`, `vision_timeout`) | – | A test fails when a key in `[lines.en]` has no German line | todo |
 | 7 | Pronunciation fixes per language (the saved file maps "bmo" to "beemo", wrong for a German voice); German misheard spellings in `heard_as` | 3 | The name is spoken correctly in a German `make say` turn; the user confirms | todo |
@@ -30,6 +30,9 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 12 | Reminder rewrite for German, or skipped in German | 4 | A German reminder is spoken back naturally; test | todo |
 | 13 | Rollout: `BMO_LANGUAGE=de` in the Pi's service file, clear `sounds/.cache`, restart | 3–12 | The German test script (timer, reminder, photo, music, weather, small talk) passes through `make say`; the user has listened | todo |
 | 14 | Strip leaked speech-to-text tokens (`<\|de\|>`) from transcripts; a transcript that is only such residue counts as nothing heard | 2 | Test in `tests/` for `_clean_transcription`; clip 05 no longer reaches the model as text | todo |
+| 15 | Tests force the local model (a device `.env` with `LLM_BACKEND=cloud` made the brain tests call the real API) | – | `make pi-test` passes on a Pi configured for the hosted model | done 84e4eb1 |
+| 16 | An action's JSON is never cut in two by the sentence splitter | – | Test `test_action_json_after_a_blank_line_is_not_cut_in_two`; a hosted-model turn with an action speaks no JSON | done 84e4eb1 |
+| 17 | A blank line in the reply ends the chunk before it, instead of flushing whatever follows word by word ("Yay," was spoken alone) | 16 | Test: JSON, blank line, then a sentence gives the sentence as one chunk | done (this commit) |
 
 ## Log
 
@@ -42,3 +45,6 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
   - The same sentences spoken by the ramona-low voice at BMO's speed (1.4): NPU 1 of 10 usable, CPU about 3 of 7. So Whisper barely understands that voice; this says something about how clear it is, not about the user's speech.
   - Consequences: the reminder parser must tolerate a mangled "Erinnere" (step 4) and both digits and number words ("5", "zehn"). Leaked `<|de|>` tokens need stripping (new step 14).
   - Not measured: the user's own voice through BMO's microphone with the fan running. Clips kept on the Pi in `logs/german_anna/`.
+- 2026-11-20: The Pi's `.env` now selects the hosted model (set by the user). First turns through Haiku: first text after 2.0 s and 5.6 s.
+- 2026-11-20, steps 15 and 16 (found while shipping step 4): `make pi-test` failed because the brain tests reached the real API; and Haiku's timer reply had its action JSON cut in two at a blank line, so no timer started and the JSON was spoken. Both fixed in 84e4eb1; the two steps share that commit. Checked on the Pi: a reply starting with a `set_expression` action ran the action and spoke no JSON, but "Yay," was spoken as its own chunk (new step 17).
+- 2026-11-20, step 4: on the Pi "Stell einen Timer auf 5 Sekunden" took the keyword route and rang after 5 s; "Erinnere mich in 6 Sekunden an den Tee" set a reminder with the message "den tee" (events log: timer_set and timer_done for both). The confirmation is still spoken in English because the Pi runs with `BMO_LANGUAGE=en`.

@@ -202,14 +202,19 @@ class Brain:
                     # If buffer ends with punctuation or newline, yield it
                     # An action's JSON stays in one piece: cut in two it cannot be parsed and gets spoken
                     in_json = buffer.count("{") > buffer.count("}")
-                    if not in_json and (any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']) or "\n\n" in buffer):
+                    carry = ""
+                    if not in_json and "\n\n" in buffer and not buffer.endswith(('.', '!', '?', '\n')):
+                        # A blank line ends the chunk before it; what follows starts the next one
+                        buffer, carry = buffer.rsplit("\n\n", 1)
+                        buffer += "\n\n"
+                    if not in_json and any(buffer.endswith(punc) for punc in ['.', '!', '?', '\n']):
                         cleaned = strip_pronunciation_tag(strip_prompt_leakage(buffer))
                         out_chunk = "" if tag_seen else CHARACTER.normalize_name(cleaned)
                         tag_seen = tag_seen or strip_pronunciation_tag(buffer) != buffer.strip()
                         # Clear before yielding: breaking out at the sentence
                         # limit used to leave the last sentence in the buffer,
                         # and it was then yielded (and spoken) a second time.
-                        buffer = ""
+                        buffer = carry
                         if any(ch.isalnum() for ch in out_chunk):    # a lone '!' is not a sentence
                             yield out_chunk
                             sentences_yielded += 1
