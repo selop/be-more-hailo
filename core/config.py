@@ -102,7 +102,7 @@ def t(key):
 # see core/cloud_llm.py). To change the hosted model, check that it accepts
 # the options cloud_llm.py sends.
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "local")
-CLOUD_LLM_MODEL = "claude-opus-5-5"
+CLOUD_LLM_MODEL = "claude-haiku-5-5"      # the smallest and cheapest current Claude model
 
 
 def say(key, **values):

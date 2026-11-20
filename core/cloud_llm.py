@@ -38,13 +38,12 @@ def stream(history):
     while messages and messages[0]["role"] != "user":       # trimmed history can start with a reply
         messages.pop(0)
 
-    with _client.beta.messages.stream(
+    with _client.messages.stream(
         model=CLOUD_LLM_MODEL,
         max_tokens=4096,
         system=get_system_prompt(),             # built per turn, so the time and date in it are current
-        output_config={"effort": "low"},        # a spoken reply: answer quickly
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",                    # a declined request is re-run on another model server-side
+        thinking={"type": "disabled"},          # a spoken reply: first word fast, fewest tokens
+        output_config={"effort": "low"},
         messages=messages,
     ) as response:
         yield from _words(response.text_stream)
