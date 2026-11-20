@@ -199,8 +199,9 @@ class Brain:
             trace.set("prompt_messages", len(prompt))
 
             # The user corrected a pronunciation: remember it for the voice
+            # Only when the user spoke about it: a stray or parroted tag must not rewrite speech for good
             pron = extract_pronunciation(full_content)
-            if pron:
+            if pron and "pronounc" in user_text.lower():
                 word, phonetic = pron
                 logger.info(f"Learned new pronunciation from LLM: {word} -> {phonetic}")
                 add_pronunciation(word, phonetic)

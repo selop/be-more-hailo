@@ -95,6 +95,14 @@ def test_pronunciation_tag_is_learned_and_never_spoken():
             chunks = list(llm.Brain().stream_think("it is pronounced tuh-may-toe"))
             assert [c.strip() for c in chunks] == ["Got it."], chunks
         assert learned == [("tomato", "tuh-may-toe")] * 2
+
+        # The model parrots the tag although nobody corrected anything: spoken text is clean, nothing is saved
+        fake = FakeLLM("")
+        fake.tokens = ["Once upon a time.", "\n!PRONOUNCE:", " word=phonetic"]
+        llm._get_llm = lambda: fake
+        del learned[:]
+        chunks = list(llm.Brain().stream_think("tell me a story"))
+        assert [c.strip() for c in chunks] == ["Once upon a time."] and learned == []
     finally:
         llm._get_llm, llm._prepare_prompt, llm.add_pronunciation = saved
 
