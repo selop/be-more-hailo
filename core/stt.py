@@ -107,6 +107,11 @@ def _clean_transcription(text: str) -> str:
     # Remove timestamps like [00:00:00.000 --> 00:00:02.000] or [BLANK_AUDIO]
     text = re.sub(r'\[.*?\]', '', text).strip()
 
+    # A leaked decoder token ("Wir<|de|>ga<|de|>") means the decode went wrong; measured: such output is garbage
+    if re.search(r'<\|[^|>]*\|>', text):
+        logger.info(f"Broken decode filtered: {text!r}")
+        return ""
+
     # Fix misheard spellings of the character's name
     text = CHARACTER.normalize_name(text)
 

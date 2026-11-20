@@ -444,6 +444,13 @@ def test_screensaver_speaks_one_stock_line_when_the_model_is_not_loaded():
     assert saver.last_audio_time > before + 3000           # stamped, so the next thought waits
 
 
+def test_transcript_with_leaked_decoder_tokens_counts_as_nothing_heard():
+    from core.stt import _clean_transcription
+    assert _clean_transcription("Wir<|de|>ga<|de|>") == ""
+    assert _clean_transcription("<|de|>ga") == ""
+    assert _clean_transcription("Wie spät ist es gerade?") == "Wie spät ist es gerade?"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
