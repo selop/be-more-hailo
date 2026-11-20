@@ -11,7 +11,9 @@ State of the project at the end of a long working session, for whoever continues
 
 ## Branches
 
-Nothing below is pushed. `main` equals `origin/main` (`d602e52`). The branches are stacked; each contains the ones above it.
+**Update, evening of 2026-11-20:** at the user's request all of the branches below were fast-forwarded into `main` and pushed. The table is kept as a map of what the work contained.
+
+The branches are stacked; each contains the ones above it.
 
 | Branch | Commits ahead of main | What it adds |
 |---|---|---|
@@ -25,7 +27,7 @@ Nothing below is pushed. `main` equals `origin/main` (`d602e52`). The branches a
 
 The Pi runs the tip of `feature/stt-cpu-small`. 78 tests pass on the laptop and on the Pi.
 
-**Open decision for the user:** merge order and whether to push. The simplest is to fast-forward `main` to `perf/crt-single-face-pass`, since the branches are linear.
+
 
 ## What the device is right now (selop@raspi, SD card)
 

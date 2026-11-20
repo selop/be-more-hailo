@@ -1,6 +1,6 @@
 # BMO understands and speaks German
 
-Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: blocked (the user has to listen and speak: steps 7 and 13)
+Branch: epic/german-voice (from feature/cloud-llm, which sits on refactor/solid)     Status: done (merged to main on 2026-11-20). Not explicitly confirmed by the user: the name spoken as "Bimo" (step 7) and the voice speed 1.4
 
 German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-to-text language and a "respond only in German" rule. The gaps are below.
 
@@ -28,7 +28,7 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
 | 10 | German refusal phrases in the stuck-loop detection (`core/llm.py`) | 8 | A test with a German refusal resets the history | done (see git log) |
 | 11 | All prerecorded spoken clips in German, in the chosen voice (the user, 2026-11-20: "translate all the prerecorded sounds as well") | 3 | Every sound folder with spoken clips has a `_de` folder with the same number of clips in the repository; they play in German mode | done (this commit) |
 | 12 | Reminder rewrite for German, or skipped in German | 4 | A German reminder is spoken back naturally; test | done (this commit) |
-| 13 | Rollout: `BMO_LANGUAGE=de` in the Pi's service file, clear `sounds/.cache`, restart | 3–12 | The German test script (timer, reminder, photo, music, weather, small talk) passes through `make say`; the user has listened | doing: switched and tested by text; the user has not listened yet |
+| 13 | Rollout: `BMO_LANGUAGE=de` in the Pi's service file, clear `sounds/.cache`, restart | 3–12 | The German test script (timer, reminder, photo, music, weather, small talk) passes through `make say`; the user has listened | done: the user spoke to it and reported "works pretty good right now" (2026-11-20) |
 | 14 | Strip leaked speech-to-text tokens (`<\|de\|>`) from transcripts; a transcript that is only such residue counts as nothing heard | 2 | Test in `tests/` for `_clean_transcription`; clip 05 no longer reaches the model as text | done (this commit) |
 | 15 | Tests force the local model (a device `.env` with `LLM_BACKEND=cloud` made the brain tests call the real API) | – | `make pi-test` passes on a Pi configured for the hosted model | done 84e4eb1 |
 | 16 | An action's JSON is never cut in two by the sentence splitter | – | Test `test_action_json_after_a_blank_line_is_not_cut_in_two`; a hosted-model turn with an action speaks no JSON | done 84e4eb1 |
@@ -94,3 +94,4 @@ German mode half exists: `BMO_LANGUAGE=de` switches the Piper voice, the speech-
   - The system prompt now says that its input comes from speech recognition and how to treat mishearings. Checked on the Pi with text turns: "Wie lange dauert der Lüter Marathon?" is answered as Ultramarathon without "Du meinst ..."; "Zinger Enlead." triggers `play_music`; "Stelied von Debussy" gives Clair de Lune.
   - German weather wording ("wie warm", "wie viel Grad", "draußen", "regnet") now triggers the web search; before, the model said it had no weather data.
   - Not solved: "in Tristen" was guessed as Triesen. A home town in the prompt would settle such cases; that is the user's to give.
+- 2026-11-20: the user, after speaking to it with Whisper-Small on the CPU: "works pretty good right now", and asked for everything to be merged to main and pushed. Epic closed.
