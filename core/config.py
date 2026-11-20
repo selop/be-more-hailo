@@ -71,6 +71,10 @@ VOICE_LPF_CUTOFF = int(os.environ.get("VOICE_LPF_CUTOFF", str(_voice_filter["cut
 VOICE_LPF_ORDER = int(os.environ.get("VOICE_LPF_ORDER", str(_voice_filter["order"])))      # Butterworth order (2=gentle, 6=steep)
 
 PRONUNCIATION_FILE = CHARACTER.asset("pronunciations")
+if LANGUAGE != "en":
+    # Per language: a spelling that makes the English voice say a word right makes another voice say it wrong
+    _root, _ext = os.path.splitext(PRONUNCIATION_FILE)
+    PRONUNCIATION_FILE = f"{_root}_{LANGUAGE}{_ext}"
 
 # Asset folder of the active character
 SOUNDS_DIR = CHARACTER.asset("sounds")

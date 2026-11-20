@@ -67,3 +67,6 @@ logs/
 
 # Development virtualenv (make setup)
 .venv-dev/
+
+# Learned pronunciations, written on the device
+pronunciations*.json

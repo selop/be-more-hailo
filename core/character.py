@@ -142,9 +142,12 @@ class Character:
             "order": int(voice.get("lpf_order", 4)),
         }
 
-    @property
-    def default_pronunciations(self) -> dict:
-        return dict(self._data["voice"].get("pronunciations", {}))
+    def default_pronunciations(self, language: str = "en") -> dict:
+        """Spelling fixes for the voice of *language*; a language without its
+        own table uses the general one."""
+        voice = self._data["voice"]
+        own = voice.get(language, {}).get("pronunciations")
+        return dict(own if own is not None else voice.get("pronunciations", {}))
 
     # ── Assets ───────────────────────────────────────────────────────────
 

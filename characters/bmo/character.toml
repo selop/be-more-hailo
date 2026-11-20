@@ -39,6 +39,10 @@ length_scale = 1.0
 model = "./piper/de_DE-thorsten-high.onnx"
 length_scale = 1.4
 
+[voice.de.pronunciations]
+# The German voice reads "Bimo" the way the name sounds.
+bmo = "Bimo"
+
 [voice.pronunciations]
 # Written to assets.pronunciations the first time the file is missing.
 cheesy = "cheezy"

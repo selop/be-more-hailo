@@ -5,7 +5,7 @@ import re
 import json
 import threading
 from .config import (
-    CHARACTER, PIPER_CMD, PIPER_MODEL, PIPER_LENGTH_SCALE,
+    CHARACTER, LANGUAGE, PIPER_CMD, PIPER_MODEL, PIPER_LENGTH_SCALE,
     VOICE_LPF_ENABLED, VOICE_LPF_CUTOFF, VOICE_LPF_ORDER,
     PRONUNCIATION_FILE, SOUNDS_DIR,
 )
@@ -33,7 +33,7 @@ def load_pronunciations() -> dict:
             logger.error(f"Error loading pronunciations: {e}")
 
     # Default dictionary if file doesn't exist or fails to load
-    default_dict = CHARACTER.default_pronunciations
+    default_dict = CHARACTER.default_pronunciations(LANGUAGE)
     save_pronunciations(default_dict)
     return default_dict
 

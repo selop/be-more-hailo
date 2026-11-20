@@ -163,6 +163,13 @@ def test_every_spoken_line_exists_in_every_language_of_the_pack():
         assert not missing, f"[lines.{language}] lacks {missing}"
 
 
+def test_pronunciation_fixes_are_per_language():
+    c = load_character("bmo")
+    assert c.default_pronunciations("en")["bmo"] == "beemo"
+    assert c.default_pronunciations("de") == {"bmo": "Bimo"}
+    assert c.default_pronunciations("fr") == c.default_pronunciations("en")     # no own table: the general one
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
