@@ -1,5 +1,6 @@
 """Microphone recording and wake-word detection."""
 
+import time
 import wave
 import logging
 
@@ -83,6 +84,7 @@ def wait_for_wakeword(oww, stop_event, get_state, suppressed_states, *, extra_su
 
 
 BLOCK_SEC = 0.03
+STALL_GRACE_SEC = 3.0     # how long past the longest recording to wait for a silent microphone stream
 
 
 class Endpointer:
@@ -123,11 +125,11 @@ class Endpointer:
         return self.ended is not None
 
 
-def record_until_silence(stop_event, meter_cb=None, *, filename="input.wav"):
+def record_until_silence(stop_event, meter_cb=None, *, filename="input.wav", max_sec=15.0):
     """Record from the microphone until the speaker stops, returning the WAV
     path, or ``None`` when nobody spoke. ``meter_cb`` gets each block's level."""
     floor = mic_monitor.snapshot().get("noise_floor") or 250      # the room just before the wake word
-    endpointer = Endpointer(floor)
+    endpointer = Endpointer(floor, max_sec=max_sec)
     frames = []
 
     def callback(indata, frames_count, time_info, status):
@@ -142,7 +144,15 @@ def record_until_silence(stop_event, meter_cb=None, *, filename="input.wav"):
     try:
         with sd.InputStream(samplerate=MIC_SAMPLE_RATE, device=MIC_DEVICE_INDEX, channels=1, dtype='int16',
                             blocksize=int(MIC_SAMPLE_RATE * BLOCK_SEC), callback=callback):
+            # The endpointer counts audio, not time: a stream that opens but delivers nothing
+            # (seen on the device, agent stuck on "Listening") would otherwise wait forever.
+            deadline = time.time() + max_sec + STALL_GRACE_SEC
             while not stop_event.is_set() and not endpointer.ended:
+                if time.time() > deadline:
+                    endpointer.ended = "stalled"
+                    bmo_print("STT", f"Microphone stream delivered {len(frames)} blocks in {max_sec + STALL_GRACE_SEC:.0f} s; giving up")
+                    trace.event("mic_stalled", blocks=len(frames))
+                    break
                 sd.sleep(30)
     except Exception as e:
         bmo_print("STT", f"Recording Error: {e}")

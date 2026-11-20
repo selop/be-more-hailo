@@ -493,6 +493,36 @@ def test_following_sentences_are_synthesised_while_the_first_one_plays():
         assert plays[0] == 3, events             # by the end of the first sentence, all three were ready
 
 
+def test_recorder_gives_up_when_the_microphone_delivers_nothing():
+    from core import audio_input
+
+    class SilentStream:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class FakeSoundDevice:
+        InputStream = SilentStream
+
+        @staticmethod
+        def sleep(ms):
+            time.sleep(ms / 1000)
+
+    saved = (audio_input.sd, audio_input.STALL_GRACE_SEC)
+    audio_input.sd, audio_input.STALL_GRACE_SEC = FakeSoundDevice, 0.1
+    try:
+        started = time.time()
+        assert audio_input.record_until_silence(threading.Event(), max_sec=0.1) is None
+        assert time.time() - started < 2
+    finally:
+        audio_input.sd, audio_input.STALL_GRACE_SEC = saved
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
