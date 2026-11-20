@@ -466,6 +466,33 @@ def test_german_requests_take_the_same_shortcuts_as_english():
         assert detect_pre_llm_action(sentence) is None and not needs_web_search(sentence), sentence
 
 
+def test_following_sentences_are_synthesised_while_the_first_one_plays():
+    events = []
+
+    class SlowSynth:
+        def synthesize(self, text):
+            events.append(("synth", text))
+            return b"\x00\x00" * 100
+
+    class Player(FakePlayer):
+        def play(self, pcm):
+            real_time.sleep(0.05)                 # "playing": time for the worker to get ahead
+            events.append(("play", sum(1 for kind, _ in events if kind == "synth")))
+            super().play(pcm)
+
+    import time as real_time
+    with Harness(ScriptedBrain(["One.", "Two.", "Three."])) as h:
+        h.player = Player()
+        turn.get_player = lambda: h.player
+        synth = SlowSynth()
+        turn.get_synthesizer = lambda: synth
+        h.conv.respond("go")
+        assert h.spoken == ["One.", "Two.", "Three."]
+        assert [text for kind, text in events if kind == "synth"] == ["One.", "Two.", "Three."]     # each once, in order
+        plays = [count for kind, count in events if kind == "play"]
+        assert plays[0] == 3, events             # by the end of the first sentence, all three were ready
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

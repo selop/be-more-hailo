@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 from . import audio_input, dispatch, trace
 from .audio_input import record_until_silence, wait_for_wakeword
@@ -98,6 +99,7 @@ class Conversation:
         self.ui = ui
         self.stop_event = stop_event
         self.brain = brain if brain is not None else Brain()
+        self._ahead = {}                # reply chunk → Future of its synthesised audio
         # Handle of the currently playing thinking sound (a subprocess)
         self.thinking_audio_process = None
         # Running timers, for the on-screen clock (see active_timers())
@@ -131,6 +133,13 @@ class Conversation:
     # Speaking
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _synthesize(clean_text):
+        """Return (pcm, milliseconds it took)."""
+        t0 = time.time()
+        pcm = get_synthesizer().synthesize(clean_text)
+        return pcm, (time.time() - t0) * 1000
+
     def speak(self, text, msg="Speaking..."):
         clean_text = clean_text_for_speech(text)
         if not clean_text or not any(c.isalnum() for c in clean_text):
@@ -138,12 +147,10 @@ class Conversation:
 
         bmo_print("TTS", f"Speaking: {clean_text[:30]}...")
         try:
-            synth = get_synthesizer()
             player = get_player()
 
-            t0 = time.time()
-            pcm = synth.synthesize(clean_text)
-            synth_ms = (time.time() - t0) * 1000
+            ahead = self._ahead.pop(text, None)         # prepared while the previous sentence played
+            pcm, synth_ms = ahead.result() if ahead else self._synthesize(clean_text)
             audio_dur = len(pcm) / 2 / 22050 if pcm else 0
             bmo_print("TTS", f"Piper: {synth_ms:.0f}ms synth -> {audio_dur:.1f}s audio")
             if not pcm:
@@ -372,8 +379,16 @@ class Conversation:
         )
 
         tts_start = time.time()
-        for chunk in result.speak_chunks:
-            self.speak(chunk)
+        # A slow voice needs almost as long to compute a sentence as to say it.
+        # One worker prepares the following sentences while the current one plays.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            for chunk in result.speak_chunks:
+                clean = clean_text_for_speech(chunk)
+                if clean and any(c.isalnum() for c in clean):
+                    self._ahead[chunk] = pool.submit(self._synthesize, clean)
+            for chunk in result.speak_chunks:
+                self.speak(chunk)
+        self._ahead.clear()
         if result.speak_chunks:
             bmo_print("TTS", f"Total speak time: {time.time()-tts_start:.2f}s ({len(result.speak_chunks)} chunks)")
 
